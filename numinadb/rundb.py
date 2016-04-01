@@ -24,6 +24,7 @@ import os
 import logging
 import datetime
 
+import six.moves.configparser as configparser
 from sqlalchemy import create_engine
 from numina.user.helpers import ProcessingTask, WorkEnvironment, DiskStorageDefault
 
@@ -31,7 +32,6 @@ from .model import Base
 from .model import Task
 from .dal import SqliteDAL, Session
 
-import ConfigParser
 
 _logger = logging.getLogger("numina")
 
@@ -42,21 +42,22 @@ class MyW(WorkEnvironment):
         resultsdir = os.path.join(basedir, mdir, 'results')
         super(MyW, self).__init__(basedir, workdir, resultsdir, datadir)
 
+
 def register(subparsers, config):
 
     try:
         db_default = config.get('rundb', 'database')
-    except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+    except (configparser.NoSectionError, configparser.NoOptionError):
         db_default = 'processing.db'
 
     try:
         ddir_default = config.get('rundb', 'datadir')
-    except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+    except (configparser.NoSectionError, configparser.NoOptionError):
         ddir_default = None
 
     try:
         bdir_default = config.get('rundb', 'basedir')
-    except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+    except (configparser.NoSectionError, configparser.NoOptionError):
         bdir_default = os.getcwd()
 
     parser_run = subparsers.add_parser(
@@ -128,30 +129,22 @@ def mode_run_common_obs(args):
 
     # Directories with relevant data
 
-    #cwd = os.getcwd()
-    #os.chdir(args.datadir)
 
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
     pipe_name = args.pipe_name
 
-    #obsres = dal.obsres_from_oblock_id(args.obid)
-
+    obsres = dal.obsres_from_oblock_id(args.obid)
 
     # Direct query to insert a new task
     session = Session()
-    #newtask = Task(ob_id=obsres.id)
-    #session.add(newtask)
-    #session.commit()
-
-    class A(object):
-        pass
-
-    newtask = A()
-    newtask.id = 1
-    newtask.ob_id = 2
+    newtask = Task(ob_id=obsres.id)
+    session.add(newtask)
+    session.commit()
 
     workenv = MyW(args.basedir, args.datadir, newtask)
-    print(workenv)
+
+    cwd = os.getcwd()
+    os.chdir(workenv.datadir)
 
     recipeclass = dal.search_recipe_from_ob(obsres, pipe_name)
     _logger.debug('recipe class is %s', recipeclass)
@@ -183,10 +176,10 @@ def mode_run_common_obs(args):
     for req in recipeclass.products().values():
         _logger.info('recipe provides %r', req)
 
-    runinfo = {'pipeline': vpipe_name,
-               'recipeclass': vrecipeclass,
+    runinfo = {'pipeline': pipe_name,
+               'recipeclass': recipeclass,
                'workenv': workenv,
-               'recipe_version': vrecipe.__version__,
+               'recipe_version': recipe.__version__,
                'instrument_configuration': None
                }
 
@@ -204,6 +197,10 @@ def mode_run_common_obs(args):
     where = DiskStorageDefault(resultsdir=workenv.resultsdir)
 
     where.store(completed_task)
+
+    newtask.completion_time = datetime.datetime.now()
+    session.commit()
+
 
 def create_recipe_file_logger(logger, logfile, logformat):
     '''Redirect Recipe log messages to a file.'''
@@ -263,4 +260,3 @@ def run_recipe_timed(recipe, rinput, task):
     task.runinfo['time_end'] = now2.strftime(TIMEFMT)
     task.runinfo['time_running'] = now2 - now1
     return task
-
