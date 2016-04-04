@@ -27,13 +27,55 @@ import datetime
 import six.moves.configparser as configparser
 from sqlalchemy import create_engine
 from numina.user.helpers import ProcessingTask, WorkEnvironment, DiskStorageDefault
+from numina.user.clirundal import run_recipe
+from numina.core.products import DataProductTag
 
 from .model import Base
 from .model import Task
+from .model import DataProduct
 from .dal import SqliteDAL, Session
 
 
 _logger = logging.getLogger("numina")
+
+import yaml
+
+class MyT(ProcessingTask):
+
+    def store(self, where):
+        # save to disk the RecipeResult part and return the file to save it
+
+        result = self.result
+
+        saveres = self.result.store_to(where)
+
+        self.post_result_store(result, saveres)
+
+        with open(where.result, 'w+') as fd:
+            yaml.dump(saveres, fd)
+
+        self.result = where.result
+
+        with open(where.task, 'w+') as fd:
+            yaml.dump(self.__dict__, fd)
+        return where.task
+
+    def post_result_store(self, result, saveres):
+
+        session = Session()
+
+        for key, prod in result.stored().items():
+            if prod.dest != 'qc' and isinstance(prod.type, DataProductTag):
+                #
+                product = DataProduct(datatype=prod.type.__class__.__name__,
+                                      task_id=self.runinfo['taskid'],
+                                      instrument_id='MEGARA',
+                                      contents=saveres[prod.dest]
+                                      )
+
+                session.add(product)
+        session.commit()
+
 
 class MyW(WorkEnvironment):
     def __init__(self, basedir, datadir, task):
@@ -137,11 +179,11 @@ def mode_run_common_obs(args):
 
     # Direct query to insert a new task
     session = Session()
-    newtask = Task(ob_id=obsres.id)
-    session.add(newtask)
+    dbtask = Task(ob_id=obsres.id)
+    session.add(dbtask)
     session.commit()
 
-    workenv = MyW(args.basedir, args.datadir, newtask)
+    workenv = MyW(args.basedir, args.datadir, dbtask)
 
     cwd = os.getcwd()
     os.chdir(workenv.datadir)
@@ -176,14 +218,16 @@ def mode_run_common_obs(args):
     for req in recipeclass.products().values():
         _logger.info('recipe provides %r', req)
 
-    runinfo = {'pipeline': pipe_name,
+    runinfo = {
+        'taskid': dbtask.id,
+        'pipeline': pipe_name,
                'recipeclass': recipeclass,
                'workenv': workenv,
                'recipe_version': recipe.__version__,
                'instrument_configuration': None
                }
 
-    task = ProcessingTask(obsres, runinfo)
+    task = MyT(obsres, runinfo)
 
     # Copy files
     _logger.debug('copy files to work directory')
@@ -198,65 +242,5 @@ def mode_run_common_obs(args):
 
     where.store(completed_task)
 
-    newtask.completion_time = datetime.datetime.now()
+    dbtask.completion_time = datetime.datetime.now()
     session.commit()
-
-
-def create_recipe_file_logger(logger, logfile, logformat):
-    '''Redirect Recipe log messages to a file.'''
-    recipe_formatter = logging.Formatter(logformat)
-    fh = logging.FileHandler(logfile, mode='w')
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(recipe_formatter)
-    return fh
-
-
-def run_recipe(recipe, task, rinput, workenv, task_control):
-    """Recipe execution mode of numina."""
-
-    # Creating custom logger file
-    DEFAULT_RECIPE_LOGGER = 'numina.recipes'
-    recipe_logger = logging.getLogger(DEFAULT_RECIPE_LOGGER)
-
-    logger_control = task_control['logger']
-    if logger_control['enabled']:
-        logfile = os.path.join(workenv.resultsdir, logger_control['logfile'])
-        logformat = logger_control['format']
-        _logger.debug('creating file logger %r from Recipe logger', logfile)
-        fh = create_recipe_file_logger(recipe_logger, logfile, logformat)
-    else:
-        fh = logging.NullHandler()
-
-    recipe_logger.addHandler(fh)
-
-
-    csd = os.getcwd()
-    _logger.debug('cwd to workdir')
-    os.chdir(workenv.workdir)
-    try:
-        completed_task = run_recipe_timed(recipe, rinput, task)
-
-        return completed_task
-
-    finally:
-        _logger.debug('cwd to original path: %r', csd)
-        os.chdir(csd)
-        recipe_logger.removeHandler(fh)
-
-
-def run_recipe_timed(recipe, rinput, task):
-    """Run the recipe and count the time it takes."""
-    TIMEFMT = '%FT%T'
-    _logger.info('running recipe')
-    now1 = datetime.datetime.now()
-    task.runinfo['time_start'] = now1.strftime(TIMEFMT)
-    #
-
-    result = recipe.run(rinput)
-    _logger.info('result: %r', result)
-    task.result = result
-    #
-    now2 = datetime.datetime.now()
-    task.runinfo['time_end'] = now2.strftime(TIMEFMT)
-    task.runinfo['time_running'] = now2 - now1
-    return task

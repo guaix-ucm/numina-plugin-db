@@ -70,3 +70,12 @@ class Task(Base):
     completion_time = Column(DateTime)
 
 
+class DataProduct(Base):
+    __tablename__ = 'products'
+
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(String(10))
+    datatype = Column(String(45))
+    task_id = Column(Integer, ForeignKey('tasks.id'))
+    contents = Column(String(45))
+
