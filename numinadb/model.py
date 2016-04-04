@@ -23,11 +23,11 @@ import datetime
 
 from sqlalchemy.ext.declarative import declarative_base
 # from sqlalchemy import UniqueConstraint, ForeignKeyConstraint, PrimaryKeyConstraint, CheckConstraint, desc
-from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP
+from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP, Unicode, UnicodeText
 from sqlalchemy import Table, Column, ForeignKey
 # from sqlalchemy import PickleType, Enum
 from sqlalchemy.orm import relationship, backref, synonym
-# from sqlalchemy.orm.collections import attribute_mapped_collection
+from sqlalchemy.orm.collections import attribute_mapped_collection
 # from sqlalchemy.orm import validates
 
 
@@ -47,6 +47,20 @@ class MyOb(Base):
     completion_time = Column(DateTime)
     frames = relationship("Frame", back_populates='ob')
 
+    facts = relationship("ObFact",
+                         collection_class=attribute_mapped_collection('key'))
+
+    children = []
+
+class ObFact(Base):
+    """A fact about an OB."""
+
+    __tablename__ = 'obs_fact'
+
+    ob_id = Column(ForeignKey('obs.id'), primary_key=True)
+    key = Column(String(64), primary_key=True)
+    val = Column(String(64))
+
 
 class Frame(Base):
     __tablename__ = 'frames'
@@ -56,6 +70,10 @@ class Frame(Base):
     ob = relationship("MyOb", back_populates='frames')
     #
     filename = synonym("name")
+
+    def open(self):
+        from astropy.io import fits
+        return fits.open(self.name, mode='readonly')
 
     def to_numina_frame(self):
         return numina.core.dataframe.DataFrame(filename=self.filename)
