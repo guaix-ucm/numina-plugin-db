@@ -20,6 +20,7 @@
 """User command line interface of Numina."""
 
 
+import os
 import logging
 
 from sqlalchemy.orm import sessionmaker
@@ -34,7 +35,7 @@ from numina.dal.stored import ObservingBlock
 from numina.dal.stored import StoredProduct, StoredParameter
 from numina.core import fully_qualified_name
 
-from .model import MyOb
+from .model import MyOb, DataProduct
 
 Session = sessionmaker()
 
@@ -58,10 +59,12 @@ def tags_are_valid(subset, superset):
 
 
 class SqliteDAL(AbsDAL):
-    def __init__(self, engine):
+    def __init__(self, engine, basedir, datadir):
         super(SqliteDAL, self).__init__()
         self.drps = DrpSystem()
         Session.configure(bind=engine)
+        self.basedir = basedir
+        self.datadir = datadir
 
     def search_oblock_from_id(self, obsid):
         session = Session()
@@ -72,7 +75,7 @@ class SqliteDAL(AbsDAL):
                                   res.instrument,
                                   res.mode,
                                   thisframes,
-                                  children=None,
+                                  children=[],
                                   parent=None)
         else:
             raise NoResultFound("oblock with id %d not found" % obsid)
@@ -118,31 +121,36 @@ class SqliteDAL(AbsDAL):
         drp = self.drps.query_by_name(ins)
         label = product_label(drp, klass)
 
-        # search results of these OBs
-        for prod in self.prod_table[ins]:
-            pk = prod['type']
-            pt = prod['tags']
-            if pk == label and tags_are_valid(pt, tags):
+        session = Session()
+        # FIXME: and instrument == ins
+        res = session.query(DataProduct).filter(DataProduct.datatype == label)
+
+        for prod in res:
+
+            # pt = prod['tags']
+            pt = {}
+            if True and tags_are_valid(pt, tags):
                 # this is a valid product
-                # We have found the result, no more checks
-                # Make a copy
-                rprod = dict(prod)
-                rprod['content'] = load(tipo, prod['content'])
-                return StoredProduct(**rprod)
+                return StoredProduct(id=prod.id,
+                                     content=load(tipo, os.path.join(self.basedir, prod.contents)),
+                                     tags={}
+                                     )
         else:
             msg = 'type %s compatible with tags %r not found' % (klass, tags)
             raise NoResultFound(msg)
 
     def search_param_req(self, req, instrument, mode, pipeline):
-        self.req_table = None
-        req_table_ins = self.req_table.get(instrument, {})
-        req_table_insi_pipe = req_table_ins.get(pipeline, {})
-        mode_keys = req_table_insi_pipe.get(mode, {})
-        if req.dest in mode_keys:
-            value = mode_keys[req.dest]
-            content = StoredParameter(value)
-            return content
-        else:
+        # FIXME: a table with parameters...
+        # self.req_table = None
+        # req_table_ins = self.req_table.get(instrument, {})
+        # req_table_insi_pipe = req_table_ins.get(pipeline, {})
+        # mode_keys = req_table_insi_pipe.get(mode, {})
+        # if req.dest in mode_keys:
+        #     value = mode_keys[req.dest]
+        #     content = StoredParameter(value)
+        #     return content
+        # else:
+        if True:
             raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
 
     def obsres_from_oblock_id(self, obsid):
@@ -160,7 +168,11 @@ class SqliteDAL(AbsDAL):
         if tagger is None:
             master_tags = {}
         else:
+            # FIXME: This information should be stored in the db
+            current = os.getcwd()
+            os.chdir(self.datadir)
             master_tags = tagger(obsres)
+            os.chdir(current)
 
         obsres.tags = master_tags
         return obsres
