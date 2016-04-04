@@ -45,11 +45,9 @@ class MyT(ProcessingTask):
     def store(self, where):
         # save to disk the RecipeResult part and return the file to save it
 
-        result = self.result
-
         saveres = self.result.store_to(where)
 
-        self.post_result_store(result, saveres)
+        self.post_result_store(self.result, saveres)
 
         with open(where.result, 'w+') as fd:
             yaml.dump(saveres, fd)
@@ -178,7 +176,9 @@ def mode_run_common_obs(args):
     uri = 'sqlite:///%s' % args.db_uri
     engine = create_engine(uri, echo=False)
     # DAL must use the database
-    dal = SqliteDAL(engine)
+    if args.datadir is None:
+        datadir = os.path.join(args.basedir, 'data')
+    dal = SqliteDAL(engine, basedir=args.basedir, datadir=datadir)
 
     # Directories with relevant data
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
@@ -192,7 +192,7 @@ def mode_run_common_obs(args):
     session.add(dbtask)
     session.commit()
 
-    workenv = MyW(args.basedir, args.datadir, dbtask)
+    workenv = MyW(args.basedir, datadir, dbtask)
 
     cwd = os.getcwd()
     os.chdir(workenv.datadir)
@@ -230,11 +230,11 @@ def mode_run_common_obs(args):
     runinfo = {
         'taskid': dbtask.id,
         'pipeline': pipe_name,
-               'recipeclass': recipeclass,
-               'workenv': workenv,
-               'recipe_version': recipe.__version__,
-               'instrument_configuration': None
-               }
+        'recipeclass': recipeclass,
+        'workenv': workenv,
+        'recipe_version': recipe.__version__,
+        'instrument_configuration': None
+    }
 
     task = MyT(obsres, runinfo)
 
