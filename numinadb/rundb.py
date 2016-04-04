@@ -62,6 +62,8 @@ class MyT(ProcessingTask):
 
     def post_result_store(self, result, saveres):
 
+        mdir = build_mdir(self.runinfo['taskid'], self.observation['observing_result'])
+
         session = Session()
 
         for key, prod in result.stored().items():
@@ -70,18 +72,27 @@ class MyT(ProcessingTask):
                 product = DataProduct(datatype=prod.type.__class__.__name__,
                                       task_id=self.runinfo['taskid'],
                                       instrument_id='MEGARA',
-                                      contents=saveres[prod.dest]
+                                      contents=os.path.join(mdir, 'results', saveres[prod.dest])
                                       )
 
                 session.add(product)
         session.commit()
 
 
+def build_mdir(taskid, obsid):
+    mdir = "task_{0}_{1}".format(taskid, obsid)
+    return mdir
+
+
 class MyW(WorkEnvironment):
     def __init__(self, basedir, datadir, task):
-        mdir = "task_{0.id}_{0.ob_id}".format(task)
+        mdir = build_mdir(task.id, task.ob_id)
         workdir = os.path.join(basedir, mdir, 'work')
         resultsdir = os.path.join(basedir, mdir, 'results')
+
+        if datadir is None:
+            datadir = os.path.join(basedir, 'data')
+
         super(MyW, self).__init__(basedir, workdir, resultsdir, datadir)
 
 
@@ -170,8 +181,6 @@ def mode_run_common_obs(args):
     dal = SqliteDAL(engine)
 
     # Directories with relevant data
-
-
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
     pipe_name = args.pipe_name
 
