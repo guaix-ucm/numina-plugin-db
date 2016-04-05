@@ -76,7 +76,8 @@ class SqliteDAL(AbsDAL):
                                   res.mode,
                                   thisframes,
                                   children=[],
-                                  parent=None)
+                                  parent=None,
+                                  facts=res.facts)
         else:
             raise NoResultFound("oblock with id %d not found" % obsid)
 
@@ -120,22 +121,27 @@ class SqliteDAL(AbsDAL):
         klass = tipo.__class__
         drp = self.drps.query_by_name(ins)
         label = product_label(drp, klass)
-
+        # print('search prod', tipo, ins, tags, pipeline)
         session = Session()
         # FIXME: and instrument == ins
         res = session.query(DataProduct).filter(DataProduct.datatype == label)
 
         for prod in res:
-
-            # pt = prod['tags']
             pt = {}
-            if True and tags_are_valid(pt, tags):
+            # FIXME: facts should be a dictionary
+            for f in prod.facts:
+                pt[f.key] = f.value
+            # print('product ', prod.id, 'tags', pt)
+            #print prod.facts
+            #pt = {}
+            if tags_are_valid(pt, tags):
                 # this is a valid product
                 return StoredProduct(id=prod.id,
                                      content=load(tipo, os.path.join(self.basedir, prod.contents)),
-                                     tags={}
+                                     tags=pt
                                      )
         else:
+            # print('not found, raise')
             msg = 'type %s compatible with tags %r not found' % (klass, tags)
             raise NoResultFound(msg)
 
@@ -156,25 +162,13 @@ class SqliteDAL(AbsDAL):
     def obsres_from_oblock_id(self, obsid):
         # Search
         obsres = self.search_oblock_from_id(obsid)
-        this_drp = self.drps.query_by_name(obsres.instrument)
 
-        for mode in this_drp.modes:
-            if mode.key == obsres.mode:
-                tagger = mode.tagger
-                break
-        else:
-            raise ValueError('no mode for %s in instrument %s' % (obsres.mode, obsres.instrument))
+        # Fill tags
+        obsres.tags = {}
 
-        if tagger is None:
-            master_tags = {}
-        else:
-            # FIXME: This information should be stored in the db
-            current = os.getcwd()
-            os.chdir(self.datadir)
-            master_tags = tagger(obsres)
-            os.chdir(current)
+        for fact in obsres.facts:
+            obsres.tags[fact.key] = fact.value
 
-        obsres.tags = master_tags
         return obsres
 
 
