@@ -14,6 +14,7 @@ setup(name='numinadb',
       description='Numina Database Plugin',
       packages=find_packages('.'),
       install_requires=[
+          "six",
           "sqlalchemy"
       ],
       entry_points={
