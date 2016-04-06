@@ -37,22 +37,32 @@ from .helpers import ProcessingTask, WorkEnvironment
 _logger = logging.getLogger("numina")
 
 
+def complete_config(config):
+    """Complete config with default values"""
+
+    if not config.has_section('rundb'):
+        config.add_section('rundb')
+
+    values = {
+        'database': 'sqlite:///processing.db',
+        'datadir': "",
+        'basedir': os.getcwd(),
+    }
+
+    for k, v in values.items():
+        if not config.has_option('rundb', k):
+            config.set('rundb', k, v)
+
+    return config
+
+
 def register(subparsers, config):
 
-    try:
-        db_default = config.get('rundb', 'database')
-    except (configparser.NoSectionError, configparser.NoOptionError):
-        db_default = 'processing.db'
+    complete_config(config)
 
-    try:
-        ddir_default = config.get('rundb', 'datadir')
-    except (configparser.NoSectionError, configparser.NoOptionError):
-        ddir_default = None
-
-    try:
-        bdir_default = config.get('rundb', 'basedir')
-    except (configparser.NoSectionError, configparser.NoOptionError):
-        bdir_default = os.getcwd()
+    db_default = config.get('rundb', 'database')
+    ddir_default = config.get('rundb', 'datadir')
+    bdir_default = config.get('rundb', 'basedir')
 
     parser_run = subparsers.add_parser(
         'rundb',
@@ -97,14 +107,12 @@ def register(subparsers, config):
 def mode_db(args):
     if args.initdb is not None:
         print('Create database in', args.initdb)
-        create_sqlite_db(filename=args.initdb)
+        create_db(uri=args.initdb)
 
 
-def create_sqlite_db(filename):
+def create_db(uri):
 
-    uri = 'sqlite:///%s' % filename
     engine = create_engine(uri, echo=False)
-
     Base.metadata.create_all(engine)
 
 
@@ -116,8 +124,7 @@ def mode_run_db(args):
 def mode_run_common_obs(args):
     """Observing mode processing mode of numina."""
 
-    uri = 'sqlite:///%s' % args.db_uri
-    engine = create_engine(uri, echo=False)
+    engine = create_engine(args.db_uri, echo=False)
     # DAL must use the database
     if args.datadir is None:
         datadir = os.path.join(args.basedir, 'data')
