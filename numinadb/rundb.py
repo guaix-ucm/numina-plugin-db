@@ -19,7 +19,7 @@
 
 """User command line interface of Numina."""
 
-
+from __future__ import print_function
 import os
 import logging
 import datetime
@@ -33,6 +33,7 @@ from numina.core.products import DataProductTag
 from .model import Base
 from .model import Task
 from .model import DataProduct
+from .model import ProductFact
 from .dal import SqliteDAL, Session
 
 
@@ -40,7 +41,12 @@ _logger = logging.getLogger("numina")
 
 import yaml
 
+
 class MyT(ProcessingTask):
+    def __init__(self, obsres=None, insconf=None):
+        super(MyT, self).__init__(obsres, insconf)
+        # Additionally
+        self.obsres = obsres
 
     def store(self, where):
         # save to disk the RecipeResult part and return the file to save it
@@ -52,10 +58,13 @@ class MyT(ProcessingTask):
         with open(where.result, 'w+') as fd:
             yaml.dump(saveres, fd)
 
-        self.result = where.result
+        out = {}
+        out['observation'] = self.observation
+        out['result'] = where.result
+        out['runinfo'] = self.runinfo
 
         with open(where.task, 'w+') as fd:
-            yaml.dump(self.__dict__, fd)
+            yaml.dump(out, fd)
         return where.task
 
     def post_result_store(self, result, saveres):
@@ -72,8 +81,11 @@ class MyT(ProcessingTask):
                                       instrument_id='MEGARA',
                                       contents=os.path.join(mdir, 'results', saveres[prod.dest])
                                       )
+                for k, v in self.obsres.tags.items():
+                    product.facts.append(ProductFact(k, v))
 
                 session.add(product)
+
         session.commit()
 
 
@@ -178,6 +190,9 @@ def mode_run_common_obs(args):
     # DAL must use the database
     if args.datadir is None:
         datadir = os.path.join(args.basedir, 'data')
+    else:
+        datadir = args.datadir
+
     dal = SqliteDAL(engine, basedir=args.basedir, datadir=datadir)
 
     # Directories with relevant data
