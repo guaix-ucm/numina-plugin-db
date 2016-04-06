@@ -13,6 +13,9 @@ setup(name='numinadb',
       license='GPLv3',
       description='Numina Database Plugin',
       packages=find_packages('.'),
+      install_requires=[
+          "sqlalchemy"
+      ],
       entry_points={
         'numina_plugins.1': [
             'rundb = numinadb.rundb:register',
