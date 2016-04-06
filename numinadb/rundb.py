@@ -33,11 +33,11 @@ from numina.core.products import DataProductTag
 from .model import Base
 from .model import Task
 from .model import DataProduct
-from .model import ProductFact
+from .model import Fact
 from .dal import SqliteDAL, Session
 
 
-_logger = logging.getLogger("numina")
+_logger = logging.getLogger("numinadb")
 
 import yaml
 
@@ -81,8 +81,13 @@ class MyT(ProcessingTask):
                                       instrument_id='MEGARA',
                                       contents=os.path.join(mdir, 'results', saveres[prod.dest])
                                       )
+
                 for k, v in self.obsres.tags.items():
-                    product.facts.append(ProductFact(k, v))
+                    fact = session.query(Fact).filter_by(key=k, value=v).first()
+                    if fact is None:
+                        fact = Fact(key=k, value=v)
+
+                    product.facts.append(fact)
 
                 session.add(product)
 

@@ -47,35 +47,22 @@ class MyOb(Base):
     completion_time = Column(DateTime)
     frames = relationship("Frame", back_populates='ob')
 
-    facts = relationship("ObFact")
-                         #collection_class=attribute_mapped_collection('key'))
-
+    facts = relationship('Fact', secondary='data_obs_fact')
     children = []
 
-class ObFact(Base):
+
+class Fact(Base):
     """A fact about an OB."""
 
-    __tablename__ = 'obs_fact'
-
-    ob_id = Column(ForeignKey('obs.id'), primary_key=True)
-    key = Column(String(64), primary_key=True)
-    value = Column(String(64))
-
-
-# TODO: Unify these two tables and use only a table of indices
-class ProductFact(Base):
-    """A fact about an OB."""
-
-    __tablename__ = 'products_fact'
-
-    # FIXME: this must be prod_id
-    prod_id = Column(ForeignKey('products.id'), primary_key=True)
-    key = Column(String(64), primary_key=True)
+    __tablename__ = 'facts'
+    id = Column(Integer, primary_key=True)
+    key = Column(String(64))
     value = Column(String(64))
 
     def __init__(self, key, value):
         self.key = key
         self.value = value
+
 
 class Frame(Base):
     __tablename__ = 'frames'
@@ -112,4 +99,18 @@ class DataProduct(Base):
     task_id = Column(Integer, ForeignKey('tasks.id'))
     contents = Column(String(45))
 
-    facts = relationship("ProductFact")
+    facts = relationship('Fact', secondary='data_products_fact')
+
+
+data_products_fact = Table(
+    'data_products_fact', Base.metadata,
+    Column('product_id', Integer, ForeignKey('products.id'), primary_key=True),
+    Column('fact_id', Integer, ForeignKey('facts.id'), primary_key=True)
+)
+
+
+data_obs_fact = Table(
+    'data_obs_fact', Base.metadata,
+    Column('obs_id', Integer, ForeignKey('obs.id'), primary_key=True),
+    Column('fact_id', Integer, ForeignKey('facts.id'), primary_key=True)
+)
