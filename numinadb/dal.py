@@ -35,7 +35,7 @@ from numina.dal.stored import ObservingBlock
 from numina.dal.stored import StoredProduct, StoredParameter
 from numina.core import fully_qualified_name
 
-from .model import MyOb, DataProduct
+from .model import MyOb, DataProduct, RecipeParameters
 
 Session = sessionmaker()
 
@@ -146,18 +146,23 @@ class SqliteDAL(AbsDAL):
             raise NoResultFound(msg)
 
     def search_param_req(self, req, instrument, mode, pipeline):
-        # FIXME: a table with parameters...
-        # self.req_table = None
-        # req_table_ins = self.req_table.get(instrument, {})
-        # req_table_insi_pipe = req_table_ins.get(pipeline, {})
-        # mode_keys = req_table_insi_pipe.get(mode, {})
-        # if req.dest in mode_keys:
-        #     value = mode_keys[req.dest]
-        #     content = StoredParameter(value)
-        #     return content
-        # else:
-        if True:
-            raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
+
+        session = Session()
+        # FIXME: pipeline is ignored...
+        res = session.query(RecipeParameters).filter(
+            RecipeParameters.instrument == instrument,
+            RecipeParameters.pipeline == pipeline,
+            RecipeParameters.mode == mode).one()
+        if res:
+            mode_keys = res.parameters
+            try:
+                value = mode_keys[req.dest]
+                content = StoredParameter(value)
+                return content
+            except KeyError:
+                pass
+
+        raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
 
     def obsres_from_oblock_id(self, obsid):
         # Search

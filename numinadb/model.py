@@ -26,6 +26,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP, Unicode, UnicodeText
 from sqlalchemy import Table, Column, ForeignKey
 # from sqlalchemy import PickleType, Enum
+from sqlalchemy import PickleType
 from sqlalchemy.orm import relationship, backref, synonym
 from sqlalchemy.orm.collections import attribute_mapped_collection
 # from sqlalchemy.orm import validates
@@ -114,3 +115,13 @@ data_obs_fact = Table(
     Column('obs_id', Integer, ForeignKey('obs.id'), primary_key=True),
     Column('fact_id', Integer, ForeignKey('facts.id'), primary_key=True)
 )
+
+
+class RecipeParameters(Base):
+    __tablename__ = 'recipe_parameters'
+
+    id = Column(Integer, primary_key=True)
+    instrument = Column(String, nullable=False)
+    pipeline = Column(String, default='default', nullable=False)
+    mode = Column(String(100), nullable=False)
+    parameters = Column(PickleType, nullable=False)
