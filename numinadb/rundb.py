@@ -37,7 +37,7 @@ from .model import Fact
 from .dal import SqliteDAL, Session
 
 
-_logger = logging.getLogger("numinadb")
+_logger = logging.getLogger("numina")
 
 import yaml
 
