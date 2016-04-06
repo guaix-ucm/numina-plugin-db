@@ -26,89 +26,15 @@ import datetime
 
 import six.moves.configparser as configparser
 from sqlalchemy import create_engine
-from numina.user.helpers import ProcessingTask, WorkEnvironment, DiskStorageDefault
+from numina.user.helpers import DiskStorageDefault
 from numina.user.clirundal import run_recipe
-from numina.core.products import DataProductTag
 
 from .model import Base
 from .model import Task
-from .model import DataProduct
-from .model import Fact
 from .dal import SqliteDAL, Session
-
+from .helpers import ProcessingTask, WorkEnvironment
 
 _logger = logging.getLogger("numina")
-
-import yaml
-
-
-class MyT(ProcessingTask):
-    def __init__(self, obsres=None, insconf=None):
-        super(MyT, self).__init__(obsres, insconf)
-        # Additionally
-        self.obsres = obsres
-
-    def store(self, where):
-        # save to disk the RecipeResult part and return the file to save it
-
-        saveres = self.result.store_to(where)
-
-        self.post_result_store(self.result, saveres)
-
-        with open(where.result, 'w+') as fd:
-            yaml.dump(saveres, fd)
-
-        out = {}
-        out['observation'] = self.observation
-        out['result'] = where.result
-        out['runinfo'] = self.runinfo
-
-        with open(where.task, 'w+') as fd:
-            yaml.dump(out, fd)
-        return where.task
-
-    def post_result_store(self, result, saveres):
-
-        mdir = build_mdir(self.runinfo['taskid'], self.observation['observing_result'])
-
-        session = Session()
-
-        for key, prod in result.stored().items():
-            if prod.dest != 'qc' and isinstance(prod.type, DataProductTag):
-                #
-                product = DataProduct(datatype=prod.type.__class__.__name__,
-                                      task_id=self.runinfo['taskid'],
-                                      instrument_id='MEGARA',
-                                      contents=os.path.join(mdir, 'results', saveres[prod.dest])
-                                      )
-
-                for k, v in self.obsres.tags.items():
-                    fact = session.query(Fact).filter_by(key=k, value=v).first()
-                    if fact is None:
-                        fact = Fact(key=k, value=v)
-
-                    product.facts.append(fact)
-
-                session.add(product)
-
-        session.commit()
-
-
-def build_mdir(taskid, obsid):
-    mdir = "task_{0}_{1}".format(taskid, obsid)
-    return mdir
-
-
-class MyW(WorkEnvironment):
-    def __init__(self, basedir, datadir, task):
-        mdir = build_mdir(task.id, task.ob_id)
-        workdir = os.path.join(basedir, mdir, 'work')
-        resultsdir = os.path.join(basedir, mdir, 'results')
-
-        if datadir is None:
-            datadir = os.path.join(basedir, 'data')
-
-        super(MyW, self).__init__(basedir, workdir, resultsdir, datadir)
 
 
 def register(subparsers, config):
@@ -212,7 +138,7 @@ def mode_run_common_obs(args):
     session.add(dbtask)
     session.commit()
 
-    workenv = MyW(args.basedir, datadir, dbtask)
+    workenv = WorkEnvironment(args.basedir, datadir, dbtask)
 
     cwd = os.getcwd()
     os.chdir(workenv.datadir)
@@ -256,7 +182,7 @@ def mode_run_common_obs(args):
         'instrument_configuration': None
     }
 
-    task = MyT(obsres, runinfo)
+    task = ProcessingTask(obsres, runinfo)
 
     # Copy files
     _logger.debug('copy files to work directory')
