@@ -161,7 +161,7 @@ class SqliteDAL(AbsDAL):
         res = session.query(RecipeParameters).filter(
             RecipeParameters.instrument == instrument,
             RecipeParameters.pipeline == pipeline,
-            RecipeParameters.mode == mode).one()
+            RecipeParameters.mode == mode).one_or_none()
         if res:
             mode_keys = res.parameters
             try:
