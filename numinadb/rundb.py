@@ -24,7 +24,6 @@ import os
 import logging
 import datetime
 
-import six.moves.configparser as configparser
 from sqlalchemy import create_engine
 from numina.user.helpers import DiskStorageDefault
 from numina.user.clirundal import run_recipe
@@ -34,7 +33,7 @@ from .model import Task
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
 
-_logger = logging.getLogger("numina")
+_logger = logging.getLogger("numina.db")
 
 
 def complete_config(config):
@@ -63,6 +62,9 @@ def register(subparsers, config):
     db_default = config.get('rundb', 'database')
     ddir_default = config.get('rundb', 'datadir')
     bdir_default = config.get('rundb', 'basedir')
+
+    if ddir_default == "":
+        ddir_default = None
 
     parser_run = subparsers.add_parser(
         'rundb',
@@ -101,6 +103,9 @@ def register(subparsers, config):
         help='path to directory containing pristine data'
         )
     parser_id.set_defaults(command=mode_run_db)
+
+
+
     return parser_run
 
 
@@ -132,6 +137,7 @@ def mode_run_common_obs(args):
         datadir = args.datadir
 
     dal = SqliteDAL(engine, basedir=args.basedir, datadir=datadir)
+    _logger.debug("DAL is %s", type(dal))
 
     # Directories with relevant data
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
@@ -154,6 +160,18 @@ def mode_run_common_obs(args):
     _logger.debug('recipe class is %s', recipeclass)
 
     rinput = recipeclass.build_recipe_input(obsres, dal, pipeline=pipe_name)
+    _logger.debug('recipe input created')
+
+    # Build the recipe input data structure
+    # and copy needed files to workdir
+    _logger.debug('parsing requirements')
+    for key in recipeclass.requirements():
+        v = getattr(rinput, key)
+        _logger.info("recipe requires %r value is %r", key, v)
+
+    _logger.debug('parsing products')
+    for req in recipeclass.products().values():
+        _logger.info('recipe provides %s, %s', req.type, req.description)
 
     os.chdir(cwd)
 
@@ -169,16 +187,6 @@ def mode_run_common_obs(args):
 
     # Load recipe control and recipe parameters from file
     task_control = dict(requirements={}, products={}, logger=logger_control)
-
-    # Build the recipe input data structure
-    # and copy needed files to workdir
-    _logger.debug('parsing requirements')
-    for key in recipeclass.requirements().values():
-        _logger.info("recipe requires %r", key)
-
-    _logger.debug('parsing products')
-    for req in recipeclass.products().values():
-        _logger.info('recipe provides %r', req)
 
     runinfo = {
         'taskid': dbtask.id,
