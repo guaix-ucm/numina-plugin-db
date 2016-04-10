@@ -99,7 +99,7 @@ class DataProduct(Base):
     datatype = Column(String(45))
     task_id = Column(Integer, ForeignKey('tasks.id'))
     contents = Column(String(45))
-
+    priority = Column(Integer, default=0)
     facts = relationship('Fact', secondary='data_products_fact')
 
 

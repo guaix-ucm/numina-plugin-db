@@ -127,11 +127,11 @@ class SqliteDAL(AbsDAL):
         # print('search prod', tipo, ins, tags, pipeline)
         session = Session()
         # FIXME: and instrument == ins
-        res = session.query(DataProduct).filter(DataProduct.datatype == label)
+        res = session.query(DataProduct).filter(DataProduct.datatype == label).order_by(DataProduct.priority.desc())
         _logger.debug('requested tags are %s', tags)
         for prod in res:
             pt = {}
-            # FIXME: facts should be a dictionary
+            # TODO: facts should be a dictionary
             for f in prod.facts:
                 pt[f.key] = f.value
             # print('product ', prod.id, 'tags', pt)
