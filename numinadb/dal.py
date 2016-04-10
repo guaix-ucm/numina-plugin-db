@@ -32,6 +32,7 @@ from numina.store import load
 from numina.dal import AbsDAL
 from numina.exceptions import NoResultFound
 from numina.dal.stored import ObservingBlock
+from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
 from numina.core import fully_qualified_name
 
@@ -39,7 +40,7 @@ from .model import MyOb, DataProduct, RecipeParameters
 
 Session = sessionmaker()
 
-_logger = logging.getLogger("numina")
+_logger = logging.getLogger("numina.db.dal")
 
 
 def product_label(drp, klass):
@@ -118,6 +119,8 @@ class SqliteDAL(AbsDAL):
     def search_prod_type_tags(self, tipo, ins, tags, pipeline):
         """Returns the first coincidence..."""
 
+        _logger.debug('query search_prod_type_tags type=%s instrument=%s tags=%s pipeline=%s',
+                      tipo, ins, tags, pipeline)
         klass = tipo.__class__
         drp = self.drps.query_by_name(ins)
         label = product_label(drp, klass)
@@ -125,7 +128,7 @@ class SqliteDAL(AbsDAL):
         session = Session()
         # FIXME: and instrument == ins
         res = session.query(DataProduct).filter(DataProduct.datatype == label)
-
+        _logger.debug('requested tags are %s', tags)
         for prod in res:
             pt = {}
             # FIXME: facts should be a dictionary
@@ -134,14 +137,20 @@ class SqliteDAL(AbsDAL):
             # print('product ', prod.id, 'tags', pt)
             #print prod.facts
             #pt = {}
+            _logger.debug('found value with id %d', prod.id)
+            _logger.debug('product tags are %s', pt)
+
             if tags_are_valid(pt, tags):
+                _logger.debug('tags are valid, return product, id=%s', prod.id)
+                _logger.debug('content is %s', prod.contents)
                 # this is a valid product
                 return StoredProduct(id=prod.id,
                                      content=load(tipo, os.path.join(self.basedir, prod.contents)),
                                      tags=pt
                                      )
+            _logger.debug('tags are in valid')
         else:
-            # print('not found, raise')
+            _logger.debug('query search_prod_type_tags, no result found')
             msg = 'type %s compatible with tags %r not found' % (klass, tags)
             raise NoResultFound(msg)
 
@@ -166,12 +175,20 @@ class SqliteDAL(AbsDAL):
 
     def obsres_from_oblock_id(self, obsid):
         # Search
-        obsres = self.search_oblock_from_id(obsid)
+        _logger.debug('query obsres_from_oblock_id with obsid=%s', obsid)
+        oblock = self.search_oblock_from_id(obsid)
 
+        obsres = ObservationResult()
+        obsres.id = oblock.id
+        obsres.mode = oblock.mode
+        obsres.instrument = oblock.instrument
+        obsres.configuration = 'default'
+        obsres.pipeline = 'default'
+        obsres.frames = oblock.frames
         # Fill tags
         obsres.tags = {}
 
-        for fact in obsres.facts:
+        for fact in oblock.facts:
             obsres.tags[fact.key] = fact.value
 
         return obsres
