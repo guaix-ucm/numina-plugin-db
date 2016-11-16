@@ -69,9 +69,9 @@ class ControlSystem(basecontrol.ControlSystem):
         session.commit()
 
     def add_facts(self, session, ob):
-        from numina.core.pipeline import DrpSystem
+        import numina.drps
 
-        drps = DrpSystem()
+        drps = numina.drps.get_system_drps()
 
         this_drp = drps.query_by_name(self.ins)
 

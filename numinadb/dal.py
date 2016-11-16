@@ -27,7 +27,7 @@ from sqlalchemy.orm import sessionmaker
 
 from numina.core import import_object
 
-from numina.core.pipeline import DrpSystem
+import numina.drps
 from numina.store import load
 from numina.dal import AbsDAL
 from numina.exceptions import NoResultFound
@@ -62,7 +62,7 @@ def tags_are_valid(subset, superset):
 class SqliteDAL(AbsDAL):
     def __init__(self, engine, basedir, datadir):
         super(SqliteDAL, self).__init__()
-        self.drps = DrpSystem()
+        self.drps = numina.drps.get_system_drps()
         Session.configure(bind=engine)
         self.basedir = basedir
         self.datadir = datadir
