@@ -41,7 +41,7 @@ Base = declarative_base()
 class MyOb(Base):
     __tablename__ = 'obs'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(String, primary_key=True)
     instrument = Column(String, nullable=False)
     mode = Column(String, nullable=False)
     start_time = Column(DateTime, default=datetime.datetime.utcnow)
@@ -69,7 +69,7 @@ class Frame(Base):
     __tablename__ = 'frames'
     id = Column(Integer, primary_key=True)
     name = Column(String(10), unique=True, nullable=False)
-    ob_id = Column(Integer,  ForeignKey("obs.id"), nullable=False)
+    ob_id = Column(String,  ForeignKey("obs.id"), nullable=False)
     ob = relationship("MyOb", back_populates='frames')
     #
     filename = synonym("name")

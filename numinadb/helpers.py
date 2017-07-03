@@ -97,6 +97,5 @@ class WorkEnvironment(numina.user.helpers.WorkEnvironment):
         if datadir is None:
             datadir = os.path.join(basedir, 'data')
 
-        super(WorkEnvironment, self).__init__(basedir, workdir, resultsdir, datadir)
-
+        super(WorkEnvironment, self).__init__("1", basedir, workdir, resultsdir, datadir)
 

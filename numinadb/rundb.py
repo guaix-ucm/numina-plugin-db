@@ -1,5 +1,5 @@
 #
-# Copyright 2016 Universidad Complutense de Madrid
+# Copyright 2016-2017 Universidad Complutense de Madrid
 #
 # This file is part of Numina
 #
@@ -27,6 +27,7 @@ import datetime
 from sqlalchemy import create_engine
 from numina.user.helpers import DiskStorageDefault
 from numina.user.clirundal import run_recipe
+from numina.core.oresult import ObservationResult
 
 from .model import Base
 from .model import Task
@@ -80,6 +81,7 @@ def register(subparsers, config):
                            const=db_default,
                            metavar='URI', 
                            help='Create a database')
+
     parser_db.set_defaults(command=mode_db)
 
     parser_id = sub.add_parser('id')
@@ -87,7 +89,7 @@ def register(subparsers, config):
     parser_id.add_argument('--db',
                            default=db_default,
                            dest='db_uri',
-                           metavar='URI', 
+                           metavar='URI',
                            help='Path to the database')
     parser_id.add_argument(
         '-p', '--pipeline', dest='pipe_name',
@@ -104,24 +106,26 @@ def register(subparsers, config):
         )
     parser_id.set_defaults(command=mode_run_db)
 
+    parser_ingest = sub.add_parser('ingest')
+    parser_ingest.add_argument('path')
 
+    parser_ingest.set_defaults(command=mode_ingest)
 
     return parser_run
 
 
-def mode_db(args):
+def mode_db(args, extra_args):
     if args.initdb is not None:
         print('Create database in', args.initdb)
         create_db(uri=args.initdb)
 
 
 def create_db(uri):
-
     engine = create_engine(uri, echo=False)
     Base.metadata.create_all(engine)
 
 
-def mode_run_db(args):
+def mode_run_db(args, extra_args):
     mode_run_common_obs(args)
     return 0
 
@@ -137,14 +141,18 @@ def mode_run_common_obs(args):
         datadir = args.datadir
 
     dal = SqliteDAL(engine, basedir=args.basedir, datadir=datadir)
-    _logger.debug("DAL is %s", type(dal))
+    _logger.debug("DAL is %s with datadir=%s", type(dal), datadir)
 
     # Directories with relevant data
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
     pipe_name = args.pipe_name
 
+    cwd = os.getcwd()
+    os.chdir(datadir)
+
     obsres = dal.obsres_from_oblock_id(args.obid)
 
+    os.chdir(cwd)
     # Direct query to insert a new task
     session = Session()
     dbtask = Task(ob_id=obsres.id)
@@ -156,27 +164,28 @@ def mode_run_common_obs(args):
     cwd = os.getcwd()
     os.chdir(workenv.datadir)
 
-    recipeclass = dal.search_recipe_from_ob(obsres, pipe_name)
-    _logger.debug('recipe class is %s', recipeclass)
+    recipe = dal.search_recipe_from_ob(obsres)
 
-    rinput = recipeclass.build_recipe_input(obsres, dal, pipeline=pipe_name)
+    # Enable intermediate results by default
+    _logger.debug('enable intermediate results')
+    recipe.intermediate_results = True
+    _logger.debug('recipe created')
+
+    rinput = recipe.build_recipe_input(obsres, dal)
     _logger.debug('recipe input created')
 
     # Build the recipe input data structure
     # and copy needed files to workdir
     _logger.debug('parsing requirements')
-    for key in recipeclass.requirements():
+    for key in recipe.requirements():
         v = getattr(rinput, key)
         _logger.info("recipe requires %r value is %r", key, v)
 
     _logger.debug('parsing products')
-    for req in recipeclass.products().values():
+    for req in recipe.products().values():
         _logger.info('recipe provides %s, %s', req.type, req.description)
 
     os.chdir(cwd)
-
-    recipe = recipeclass()
-    _logger.debug('recipe created')
 
     # Logging and task control
     logger_control = dict(
@@ -191,7 +200,7 @@ def mode_run_common_obs(args):
     runinfo = {
         'taskid': dbtask.id,
         'pipeline': pipe_name,
-        'recipeclass': recipeclass,
+        'recipeclass': recipe.__class__,
         'workenv': workenv,
         'recipe_version': recipe.__version__,
         'instrument_configuration': None
@@ -214,3 +223,107 @@ def mode_run_common_obs(args):
 
     dbtask.completion_time = datetime.datetime.now()
     session.commit()
+
+from .ingest import metadata_fits
+
+
+def mode_ingest(args, extra_args):
+    print("mode ingest, path=", args.path)
+
+    obs_blocks = {}
+    frames = {}
+
+    for x in os.walk(args.path):
+        dirname, dirnames, files = x
+        print('we are in', dirname)
+        print('dirnames are', dirnames)
+        for fname in files:
+            # check based on extension
+            print(fname)
+            base, ext = os.path.splitext(fname)
+            if ext == '.fits':
+                # something
+                ff = os.path.join(dirname, fname)
+                result = metadata_fits(ff)
+                # check
+                blck_uuid = result['blckuuid']
+                if blck_uuid is None:
+                    continue
+                if blck_uuid not in obs_blocks:
+                    # new block, insert
+                    ob = ObservationResult(
+                        instrument=result['instrume'],
+                        mode=result['obsmode']
+                    )
+                    ob.id = blck_uuid
+                    ob.configuration = result['insconf']
+                    obs_blocks[blck_uuid] = ob
+
+                uuid_frame = result['uuid']
+                if uuid_frame not in frames:
+                    frames[uuid_frame] = uuid_frame
+                    obs_blocks[blck_uuid].frames.append(fname)
+
+            elif ext == '.json':
+                # something else
+                pass
+            else:
+                print("file not ingested", fname)
+
+    from .model import MyOb, Frame, Fact
+    # insert in database
+    db_uri = "sqlite:///processing.db"
+    #engine = create_engine(args.db_uri, echo=False)
+    engine = create_engine(db_uri, echo=False)
+
+    Session.configure(bind=engine)
+    session = Session()
+
+    for key, obs in obs_blocks.items():
+        now = datetime.datetime.now()
+        ob = MyOb(instrument=obs.instrument, mode=obs.mode, start_time=now)
+        ob.id = obs.id
+        session.add(ob)
+
+        for name in obs.frames:
+            # Insert into DB
+            newframe = Frame()
+            newframe.name = name
+            ob.frames.append(newframe)
+            #session.add(newframe)
+
+        # Update completion time of the OB when its finished
+        ob.completion_time = datetime.datetime.now()
+
+        # Facts
+        #self.add_facts(session, ob)
+
+        session.commit()
+
+
+def add_facts(session, ob):
+    import numina.drps
+
+    drps = numina.drps.get_system_drps()
+
+    this_drp = drps.query_by_name(ob.instrument)
+
+    tagger = None
+    for mode in this_drp.modes:
+        if mode.key == ob.mode:
+            tagger = mode.tagger
+            break
+
+    if tagger:
+        current = os.getcwd()
+        os.chdir(self.datadir)
+        master_tags = tagger(ob)
+        os.chdir(current)
+
+        for k, v in master_tags.items():
+            fact = session.query(Fact).filter_by(key=k, value=v).first()
+            if fact is None:
+                fact = Fact(key=k, value=v)
+            ob.facts.append(fact)
+
+

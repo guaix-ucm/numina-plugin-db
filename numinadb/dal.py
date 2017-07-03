@@ -1,5 +1,5 @@
 #
-# Copyright 2016 Universidad Complutense de Madrid
+# Copyright 2016-217 Universidad Complutense de Madrid
 #
 # This file is part of Numina
 #
@@ -43,7 +43,7 @@ Session = sessionmaker()
 _logger = logging.getLogger("numina.db.dal")
 
 
-def product_label(drp, klass):
+def product_labelX(drp, klass):
     fqn = fully_qualified_name(klass)
     for p in drp.products:
         if p['name'] == fqn:
@@ -66,26 +66,40 @@ class SqliteDAL(AbsDAL):
         Session.configure(bind=engine)
         self.basedir = basedir
         self.datadir = datadir
+        self.extra_data = {}
 
     def search_oblock_from_id(self, obsid):
         session = Session()
         res = session.query(MyOb).filter(MyOb.id == obsid).one()
         if res:
             thisframes = [frame.to_numina_frame() for frame in res.frames]
-            return ObservingBlock(res.id,
-                                  res.instrument,
-                                  res.mode,
-                                  thisframes,
-                                  children=[],
-                                  parent=None,
-                                  facts=res.facts)
+            ob = ObservationResult(res.instrument, res.mode)
+            ob.id = res.id
+            ob.frames = thisframes
+            ob.tags = res.facts
+            # FIXME
+            ob.configuration = "default"
+            return ob
         else:
             raise NoResultFound("oblock with id %d not found" % obsid)
 
     def search_recipe(self, ins, mode, pipeline):
-        recipe_fqn = self.search_recipe_fqn(ins, mode, pipeline)
-        klass = import_object(recipe_fqn)
-        return klass
+
+        drp = self.drps.query_by_name(ins)
+
+        if drp is None:
+            raise NoResultFound('DRP not found')
+
+        try:
+            this_pipeline = drp.pipelines[pipeline]
+        except KeyError:
+            raise NoResultFound('pipeline not found')
+
+        try:
+            recipe = this_pipeline.get_recipe_object(mode)
+            return recipe
+        except KeyError:
+            raise NoResultFound('mode not found')
 
     def search_recipe_fqn(self, ins, mode, pipename):
 
@@ -96,13 +110,14 @@ class SqliteDAL(AbsDAL):
         recipe_fqn = recipes[mode]
         return recipe_fqn
 
-    def search_recipe_from_ob(self, ob, pipeline):
+    def search_recipe_from_ob(self, ob):
         ins = ob.instrument
         mode = ob.mode
+        pipeline = ob.pipeline
         return self.search_recipe(ins, mode, pipeline)
 
     def search_prod_obsid(self, ins, obsid, pipeline):
-        '''Returns the first coincidence...'''
+        """Returns the first coincidence..."""
         ins_prod = None # self.prod_table[ins]
 
         # search results of these OBs
@@ -123,7 +138,7 @@ class SqliteDAL(AbsDAL):
                       tipo, ins, tags, pipeline)
         klass = tipo.__class__
         drp = self.drps.query_by_name(ins)
-        label = product_label(drp, klass)
+        label = drp.product_label(tipo)
         # print('search prod', tipo, ins, tags, pipeline)
         session = Session()
         # FIXME: and instrument == ins
@@ -176,21 +191,41 @@ class SqliteDAL(AbsDAL):
     def obsres_from_oblock_id(self, obsid):
         # Search
         _logger.debug('query obsres_from_oblock_id with obsid=%s', obsid)
-        oblock = self.search_oblock_from_id(obsid)
+        obsres = self.search_oblock_from_id(obsid)
 
-        obsres = ObservationResult()
-        obsres.id = oblock.id
-        obsres.mode = oblock.mode
-        obsres.instrument = oblock.instrument
-        obsres.configuration = 'default'
+        this_drp = self.drps.query_by_name(obsres.instrument)
+
+        for mode in this_drp.modes:
+            if mode.key == obsres.mode:
+                tagger = mode.tagger
+                break
+        else:
+            raise ValueError('no mode for %s in instrument %s' % (obsres.mode, obsres.instrument))
+
+        if tagger is None:
+            master_tags = {}
+        else:
+            master_tags = tagger(obsres)
+
+        obsres.tags = master_tags
+        obsres.configuration = this_drp.configuration_selector(obsres)
         obsres.pipeline = 'default'
-        obsres.frames = oblock.frames
-        # Fill tags
-        obsres.tags = {}
-
-        for fact in oblock.facts:
-            obsres.tags[fact.key] = fact.value
 
         return obsres
 
+    def search_parameter(self, name, tipo, obsres):
+        print(name, tipo, obsres)
+        raise NoResultFound("Not yet")
 
+    def search_product(self, name, tipo, obsres):
+        # returns StoredProduct
+        ins = obsres.instrument
+        tags = obsres.tags
+        pipeline = obsres.pipeline
+
+        if name in self.extra_data:
+            val = self.extra_data[name]
+            content = load(tipo, val)
+            return StoredProduct(id=0, tags={}, content=content)
+        else:
+            return self.search_prod_type_tags(tipo, ins, tags, pipeline)
