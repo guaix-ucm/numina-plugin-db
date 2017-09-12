@@ -1,5 +1,5 @@
 #
-# Copyright 2016-217 Universidad Complutense de Madrid
+# Copyright 2016-2017 Universidad Complutense de Madrid
 #
 # This file is part of Numina
 #
@@ -25,31 +25,19 @@ import logging
 
 from sqlalchemy.orm import sessionmaker
 
-from numina.core import import_object
-
 import numina.drps
 from numina.store import load
 from numina.dal import AbsDAL
 from numina.exceptions import NoResultFound
-from numina.dal.stored import ObservingBlock
 from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
-from numina.core import fully_qualified_name
+
 
 from .model import MyOb, DataProduct, RecipeParameters
 
 Session = sessionmaker()
 
 _logger = logging.getLogger("numina.db.dal")
-
-
-def product_labelX(drp, klass):
-    fqn = fully_qualified_name(klass)
-    for p in drp.products:
-        if p['name'] == fqn:
-            return p['alias']
-    else:
-        return klass.__name__
 
 
 def tags_are_valid(subset, superset):
@@ -136,9 +124,8 @@ class SqliteDAL(AbsDAL):
 
         _logger.debug('query search_prod_type_tags type=%s instrument=%s tags=%s pipeline=%s',
                       tipo, ins, tags, pipeline)
-        klass = tipo.__class__
         drp = self.drps.query_by_name(ins)
-        label = drp.product_label(tipo)
+        label = tipo.name()
         # print('search prod', tipo, ins, tags, pipeline)
         session = Session()
         # FIXME: and instrument == ins
@@ -166,7 +153,7 @@ class SqliteDAL(AbsDAL):
             _logger.debug('tags are in valid')
         else:
             _logger.debug('query search_prod_type_tags, no result found')
-            msg = 'type %s compatible with tags %r not found' % (klass, tags)
+            msg = 'type %s compatible with tags %r not found' % (label, tags)
             raise NoResultFound(msg)
 
     def search_param_req(self, req, instrument, mode, pipeline):

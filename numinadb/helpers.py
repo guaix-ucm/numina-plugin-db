@@ -20,10 +20,13 @@
 """User command line interface of Numina."""
 
 from __future__ import print_function
-import os
 
-import yaml
+import os
+import json
+from datetime import timedelta
+
 import numina.user.helpers
+import numina.core.qc
 from numina.core.products import DataProductTag
 
 from .model import DataProduct
@@ -31,21 +34,29 @@ from .model import Fact
 from .dal import Session
 
 
+class ExtEncoder(json.JSONEncoder):
+    """"Encode numpy.floats and numpy.integer"""
+    def default(self, obj):
+        if isinstance(obj, timedelta):
+            return obj.total_seconds()
+        elif isinstance(obj, numina.core.qc.QC):
+            return str(obj)
+        else:
+            return super(ExtEncoder, self).default(obj)
+
+
 class ProcessingTask(numina.user.helpers.ProcessingTask):
-    def __init__(self, obsres=None, insconf=None):
-        super(ProcessingTask, self).__init__(obsres, insconf)
-        # Additionally
-        self.obsres = obsres
+    def __init__(self, obsres=None, runinfo=None):
+        super(ProcessingTask, self).__init__(obsres, runinfo)
 
     def store(self, where):
         # save to disk the RecipeResult part and return the file to save it
-
         saveres = self.result.store_to(where)
 
         self.post_result_store(self.result, saveres)
 
         with open(where.result, 'w+') as fd:
-            yaml.dump(saveres, fd)
+            json.dump(saveres, fd, indent=2, cls=ExtEncoder)
 
         out = {}
         out['observation'] = self.observation
@@ -53,25 +64,24 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
         out['runinfo'] = self.runinfo
 
         with open(where.task, 'w+') as fd:
-            yaml.dump(out, fd)
+            json.dump(out, fd, indent=2, cls=ExtEncoder)
         return where.task
 
     def post_result_store(self, result, saveres):
-
-        mdir = build_mdir(self.runinfo['taskid'], self.observation['observing_result'])
-
         session = Session()
 
         for key, prod in result.stored().items():
             if prod.dest != 'qc' and isinstance(prod.type, DataProductTag):
                 #
-                product = DataProduct(datatype=prod.type.__class__.__name__,
+                fullpath = os.path.join(self.runinfo['results_dir'], saveres[prod.dest])
+                relpath = os.path.relpath(fullpath, self.runinfo['base_dir'])
+                product = DataProduct(datatype=prod.type.name(),
                                       task_id=self.runinfo['taskid'],
                                       instrument_id='MEGARA',
-                                      contents=os.path.join(mdir, 'results', saveres[prod.dest])
+                                      contents=relpath
                                       )
-
-                for k, v in self.obsres.tags.items():
+                master_tags = prod.type.extract_tags(fullpath)
+                for k, v in master_tags.items():
                     fact = session.query(Fact).filter_by(key=k, value=v).first()
                     if fact is None:
                         fact = Fact(key=k, value=v)

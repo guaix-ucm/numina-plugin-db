@@ -19,15 +19,76 @@
 
 """Ingestion of different types."""
 
+import os
+import json
+
+from numina.util.context import working_directory
+
 import astropy.io.fits as fits
+import numina.drps
+
+from .model import MyOb, Frame, Fact
 
 def metadata_fits(fname):
     result = {}
     with fits.open(fname) as hdulist:
         keys = ['DATE-OBS', 'VPH', 'INSMODE',
                 'obsmode', 'insconf', 'blckuuid',
-                'instrume', 'uuid']
+                'instrume', 'uuid', 'numtype']
         for key in keys:
             result[key] = hdulist[0].header.get(key)
 
     return result
+
+
+def metadata_json(fname):
+    result = {}
+    with open(fname) as fd:
+        data = json.load(fd)
+        result['tags'] = data['tags']
+        result['instrument'] = data['instrument']
+        result['numtype'] = data['type']
+        result['uuid'] = data['uuid']
+    return result
+
+
+def add_product_facts(session, prod, datadir):
+
+    drps = numina.drps.get_system_drps()
+
+    this_drp = drps.query_by_name(prod.instrument_id)
+    pipeline = this_drp.pipelines['default']
+
+    prodtype = pipeline.load_product_from_name(prod.datatype)
+
+    with working_directory(datadir):
+        master_tags = prodtype.extract_tags(prod.contents)
+
+    for k, v in master_tags.items():
+        fact = session.query(Fact).filter_by(key=k, value=v).first()
+        if fact is None:
+            fact = Fact(key=k, value=v)
+        prod.facts.append(fact)
+
+
+def add_ob_facts(session, ob, datadir):
+
+    drps = numina.drps.get_system_drps()
+    this_drp = drps.query_by_name(ob.instrument)
+
+    tagger = None
+    for mode in this_drp.modes:
+        if mode.key == ob.mode:
+            tagger = mode.tagger
+            break
+    if tagger:
+        current = os.getcwd()
+        os.chdir(datadir)
+        master_tags = tagger(ob)
+        os.chdir(current)
+        print('master_tags', master_tags)
+        for k, v in master_tags.items():
+            fact = session.query(Fact).filter_by(key=k, value=v).first()
+            if fact is None:
+                fact = Fact(key=k, value=v)
+            ob.facts.append(fact)

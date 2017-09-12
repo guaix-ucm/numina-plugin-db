@@ -20,12 +20,16 @@
 """User command line interface of Numina."""
 
 from __future__ import print_function
+
+import sys
 import os
 import logging
 import datetime
 
 from sqlalchemy import create_engine
 from numina.user.helpers import DiskStorageDefault
+from numina.dal.stored import StoredProduct
+from numina.util.context import working_directory
 from numina.user.clirundal import run_recipe
 from numina.core.oresult import ObservationResult
 
@@ -147,12 +151,9 @@ def mode_run_common_obs(args):
     _logger.debug("pipeline from CLI is %r", args.pipe_name)
     pipe_name = args.pipe_name
 
-    cwd = os.getcwd()
-    os.chdir(datadir)
+    with working_directory(datadir):
+        obsres = dal.obsres_from_oblock_id(args.obid)
 
-    obsres = dal.obsres_from_oblock_id(args.obid)
-
-    os.chdir(cwd)
     # Direct query to insert a new task
     session = Session()
     dbtask = Task(ob_id=obsres.id)
@@ -161,31 +162,42 @@ def mode_run_common_obs(args):
 
     workenv = WorkEnvironment(args.basedir, datadir, dbtask)
 
-    cwd = os.getcwd()
-    os.chdir(workenv.datadir)
+    with working_directory(workenv.datadir):
+        recipe = dal.search_recipe_from_ob(obsres)
 
-    recipe = dal.search_recipe_from_ob(obsres)
+        # Enable intermediate results by default
+        _logger.debug('enable intermediate results')
+        recipe.intermediate_results = True
 
-    # Enable intermediate results by default
-    _logger.debug('enable intermediate results')
-    recipe.intermediate_results = True
-    _logger.debug('recipe created')
+        # Update runinfo
+        _logger.debug('update recipe runinfo')
+        recipe.runinfo['runner'] = 'numina-plugin-db'
+        recipe.runinfo['runner_version'] = '1'
+        recipe.runinfo['taskid'] = dbtask.id
+        recipe.runinfo['data_dir'] = workenv.datadir
+        recipe.runinfo['work_dir'] = workenv.workdir
+        recipe.runinfo['results_dir'] = workenv.resultsdir
+        recipe.runinfo['base_dir'] = workenv.basedir
 
-    rinput = recipe.build_recipe_input(obsres, dal)
-    _logger.debug('recipe input created')
+        try:
+            rinput = recipe.build_recipe_input(obsres, dal)
+        except ValueError as err:
+            _logger.error("during recipe input construction")
+            for msg in err.args[0]:
+                _logger.error(msg)
+            sys.exit(0)
 
-    # Build the recipe input data structure
-    # and copy needed files to workdir
-    _logger.debug('parsing requirements')
-    for key in recipe.requirements():
-        v = getattr(rinput, key)
-        _logger.info("recipe requires %r value is %r", key, v)
+        _logger.debug('recipe input created')
+        # Build the recipe input data structure
+        # and copy needed files to workdir
+        _logger.debug('parsing requirements')
+        for key in recipe.requirements():
+            v = getattr(rinput, key)
+            _logger.info("recipe requires %r value is %r", key, v)
 
-    _logger.debug('parsing products')
-    for req in recipe.products().values():
-        _logger.info('recipe provides %s, %s', req.type, req.description)
-
-    os.chdir(cwd)
+        _logger.debug('parsing products')
+        for req in recipe.products().values():
+            _logger.info('recipe provides %s, %s', req.type, req.description)
 
     # Logging and task control
     logger_control = dict(
@@ -203,16 +215,20 @@ def mode_run_common_obs(args):
         'recipeclass': recipe.__class__,
         'workenv': workenv,
         'recipe_version': recipe.__version__,
+        'runner': 'numina-plugin-db',
+        'runner_version': 1,
         'instrument_configuration': None
     }
 
     task = ProcessingTask(obsres, runinfo)
 
     # Copy files
-    _logger.debug('copy files to work directory')
-    workenv.sane_work()
-    workenv.copyfiles_stage1(obsres)
-    workenv.copyfiles_stage2(rinput)
+    if True:
+        _logger.debug('copy files to work directory')
+        workenv.sane_work()
+        workenv.copyfiles_stage1(obsres)
+        workenv.copyfiles_stage2(rinput)
+        workenv.adapt_obsres(obsres)
 
     completed_task = run_recipe(recipe=recipe,task=task, rinput=rinput,
                                 workenv=workenv, task_control=task_control)
@@ -224,14 +240,16 @@ def mode_run_common_obs(args):
     dbtask.completion_time = datetime.datetime.now()
     session.commit()
 
-from .ingest import metadata_fits
-
+from .ingest import metadata_fits, add_ob_facts, add_product_facts
+from .ingest import metadata_json
 
 def mode_ingest(args, extra_args):
     print("mode ingest, path=", args.path)
 
     obs_blocks = {}
     frames = {}
+    reduction_results = {}
+    datadir = args.path
 
     for x in os.walk(args.path):
         dirname, dirnames, files = x
@@ -241,44 +259,67 @@ def mode_ingest(args, extra_args):
             # check based on extension
             print(fname)
             base, ext = os.path.splitext(fname)
+            full_fname = os.path.join(dirname, fname)
             if ext == '.fits':
                 # something
-                ff = os.path.join(dirname, fname)
-                result = metadata_fits(ff)
-                # check
-                blck_uuid = result['blckuuid']
-                if blck_uuid is None:
-                    continue
-                if blck_uuid not in obs_blocks:
-                    # new block, insert
-                    ob = ObservationResult(
-                        instrument=result['instrume'],
-                        mode=result['obsmode']
-                    )
-                    ob.id = blck_uuid
-                    ob.configuration = result['insconf']
-                    obs_blocks[blck_uuid] = ob
+                result = metadata_fits(full_fname)
 
-                uuid_frame = result['uuid']
-                if uuid_frame not in frames:
-                    frames[uuid_frame] = uuid_frame
-                    obs_blocks[blck_uuid].frames.append(fname)
+                numtype = result['numtype']
+                blck_uuid = result['blckuuid']
+
+                if numtype is not None:
+                    # a calibration
+                    print("a calibration of type", numtype)
+                    reduction_uuid = result['uuid']
+                    reduction_results[reduction_uuid] = (numtype, fname)
+                    continue
+                if blck_uuid is not None:
+                    if blck_uuid not in obs_blocks:
+                        # new block, insert
+                        ob = ObservationResult(
+                            instrument=result['instrume'],
+                            mode=result['obsmode']
+                        )
+                        ob.id = blck_uuid
+                        ob.configuration = result['insconf']
+                        obs_blocks[blck_uuid] = ob
+
+                    uuid_frame = result['uuid']
+                    if uuid_frame not in frames:
+                        frames[uuid_frame] = uuid_frame
+                        obs_blocks[blck_uuid].frames.append(fname)
 
             elif ext == '.json':
-                # something else
-                pass
+                result = metadata_json(full_fname)
+                numtype = result['numtype']
+                print("a calibration of type", numtype)
+                reduction_uuid = result['uuid']
+                reduction_results[reduction_uuid] = (numtype, fname)
             else:
                 print("file not ingested", fname)
 
-    from .model import MyOb, Frame, Fact
-    # insert in database
+    from .model import MyOb, Frame, Fact, DataProduct
+    # insert OB in database
     db_uri = "sqlite:///processing.db"
-    #engine = create_engine(args.db_uri, echo=False)
-    engine = create_engine(db_uri, echo=False)
+    # engine = create_engine(args.db_uri, echo=False)
+    # engine = create_engine(db_uri, echo=False)
+    engine = create_engine(db_uri, echo=True)
 
     Session.configure(bind=engine)
     session = Session()
 
+    for key, prod in reduction_results.items():
+        print('key=',key)
+        print('prod=',prod)
+        datatype = prod[0]
+        contents = prod[1]
+        prod_entry = DataProduct(instrument_id="MEGARA", datatype=datatype, contents=contents)
+        session.add(prod_entry)
+
+        add_product_facts(session, prod_entry, datadir)
+
+    session.commit()
+    #return
     for key, obs in obs_blocks.items():
         now = datetime.datetime.now()
         ob = MyOb(instrument=obs.instrument, mode=obs.mode, start_time=now)
@@ -296,34 +337,11 @@ def mode_ingest(args, extra_args):
         ob.completion_time = datetime.datetime.now()
 
         # Facts
-        #self.add_facts(session, ob)
+        add_ob_facts(session, ob, datadir)
 
-        session.commit()
+    session.commit()
 
 
-def add_facts(session, ob):
-    import numina.drps
 
-    drps = numina.drps.get_system_drps()
-
-    this_drp = drps.query_by_name(ob.instrument)
-
-    tagger = None
-    for mode in this_drp.modes:
-        if mode.key == ob.mode:
-            tagger = mode.tagger
-            break
-
-    if tagger:
-        current = os.getcwd()
-        os.chdir(self.datadir)
-        master_tags = tagger(ob)
-        os.chdir(current)
-
-        for k, v in master_tags.items():
-            fact = session.query(Fact).filter_by(key=k, value=v).first()
-            if fact is None:
-                fact = Fact(key=k, value=v)
-            ob.facts.append(fact)
 
 
