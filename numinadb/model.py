@@ -1,5 +1,5 @@
 #
-# Copyright 2016 Universidad Complutense de Madrid
+# Copyright 2016-2017 Universidad Complutense de Madrid
 #
 # This file is part of Numina
 #
@@ -124,4 +124,12 @@ class RecipeParameters(Base):
     instrument = Column(String, nullable=False)
     pipeline = Column(String, default='default', nullable=False)
     mode = Column(String(100), nullable=False)
+    facts = relationship('Fact', secondary='recipe_parameters_fact')
     parameters = Column(PickleType, nullable=False)
+
+
+recipe_parameters_fact = Table(
+    'recipe_paramters_fact', Base.metadata,
+    Column('param_id', Integer, ForeignKey('recipe_parameters.id'), primary_key=True),
+    Column('fact_id', Integer, ForeignKey('facts.id'), primary_key=True)
+)
