@@ -34,7 +34,7 @@ from numina.user.clirundal import run_recipe
 from numina.core.oresult import ObservationResult
 
 from .model import Base
-from .model import Fact, FactString, FactInt, FactFloat
+from .model import Fact
 from .model import Task, RecipeParameters, RecipeParameterValues
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
@@ -146,7 +146,6 @@ def mode_db(args, extra_args):
             for plp, modes in data1.items():
                 for mode, params in modes.items():
                     for param in params:
-                        #print(ins, plp, mode, param['name'], param['tags'], param['content'])
                         dbpar = session.query(RecipeParameters).filter_by(instrument=ins,
                                                                        pipeline=plp,
                                                                        mode=mode,
@@ -166,26 +165,8 @@ def mode_db(args, extra_args):
                         dbpar.values.append(newval)
 
                         for k, v in param['tags'].items():
-                            if isinstance(v, str):
-                                print('string', v)
-                                FactAbs = FactString
-                            elif isinstance(v, int):
-                                FactAbs = FactInt
-                            elif isinstance(v, float):
-                                FactAbs = FactFloat
-                            else:
-                                print('something else, not supported')
-                                continue
-
-                            fact = session.query(Fact).filter_by(key=k, value=v).first()
-                            if fact is None:
-                                fact = FactAbs()
-                                fact.key = k
-                                fact.value = v
-
-                            newval.facts.append(fact)
+                            newval[k] = v
         session.commit()
-                        # Insert values
 
 
 def create_db(uri):

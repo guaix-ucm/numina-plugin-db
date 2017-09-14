@@ -65,10 +65,7 @@ def add_product_facts(session, prod, datadir):
         master_tags = prodtype.extract_tags(prod.contents)
 
     for k, v in master_tags.items():
-        fact = session.query(Fact).filter_by(key=k, value=v).first()
-        if fact is None:
-            fact = Fact(key=k, value=v)
-        prod.facts.append(fact)
+        prod[k] = v
 
 
 def add_ob_facts(session, ob, datadir):

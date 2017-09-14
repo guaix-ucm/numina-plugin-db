@@ -29,11 +29,14 @@ from sqlalchemy import Table, Column, ForeignKey, UniqueConstraint
 
 from sqlalchemy.orm import relationship, backref, synonym
 from sqlalchemy.orm.collections import attribute_mapped_collection
+from sqlalchemy.ext.associationproxy import association_proxy
 # from sqlalchemy.orm import validates
+import numina.core.dataframe
+
 
 from .jsonsqlite import MagicJSON
-
-import numina.core.dataframe
+from .polydict import PolymorphicVerticalProperty
+from .proxydict import ProxiedDictMixin
 
 
 Base = declarative_base()
@@ -60,52 +63,39 @@ class Fact(Base):
 
     id = Column(Integer, primary_key=True)
     key = Column(String(64))
-    type = Column(String(64))
-    value = Column(String(1))
-
-    __mapper_args__ = {
-        'polymorphic_identity': 'fact',
-        'polymorphic_on': type
-    }
-
-
-class FactString(Fact):
-    """A string fact about an OB."""
-
-    __tablename__ = 'fact_string'
-
-    id = Column(Integer, ForeignKey('fact.id'), primary_key=True)
     value = Column(String(64))
 
-    __mapper_args__ = {
-        'polymorphic_identity': 'fact_string',
-    }
+
+class ProductFact(PolymorphicVerticalProperty, Base):
+    """A fact about an OB."""
+
+    __tablename__ = 'product_facts'
+    product_id = Column(ForeignKey('products.id'), primary_key=True)
+    key = Column(String(64), primary_key=True)
+    type = Column(String(16))
+
+    # add information about storage for different types
+    # in the info dictionary of Columns
+    int_value = Column(Integer, info={'type': (int, 'integer')})
+    char_value = Column(UnicodeText, info={'type': (str, 'string')})
+    boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
+    float_value = Column(Float, info={'type': (float, 'float')})
 
 
-class FactInt(Fact):
-    """A int fact about an OB."""
+class ParameterFact(PolymorphicVerticalProperty, Base):
+    """A fact about an OB."""
 
-    __tablename__ = 'fact_int'
+    __tablename__ = 'parameter_facts'
+    product_id = Column(ForeignKey('recipe_parameter_values.id'), primary_key=True)
+    key = Column(String(64), primary_key=True)
+    type = Column(String(16))
 
-    id = Column(Integer, ForeignKey('fact.id'), primary_key=True)
-    value = Column(Integer)
-
-    __mapper_args__ = {
-        'polymorphic_identity': 'fact_int',
-    }
-
-
-class FactFloat(Fact):
-    """A float fact about an OB."""
-
-    __tablename__ = 'fact_float'
-
-    id = Column(Integer, ForeignKey('fact.id'), primary_key=True)
-    value = Column(Float)
-
-    __mapper_args__ = {
-        'polymorphic_identity': 'fact_float',
-    }
+    # add information about storage for different types
+    # in the info dictionary of Columns
+    int_value = Column(Integer, info={'type': (int, 'integer')})
+    char_value = Column(UnicodeText, info={'type': (str, 'string')})
+    boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
+    float_value = Column(Float, info={'type': (float, 'float')})
 
 
 class Frame(Base):
@@ -143,26 +133,20 @@ class DataProduct(Base):
     task_id = Column(Integer, ForeignKey('tasks.id'))
     contents = Column(String(45))
     priority = Column(Integer, default=0)
-    facts = relationship('Fact', secondary='data_products_fact')
 
+    facts = relationship("ProductFact", collection_class=attribute_mapped_collection('key'))
 
-data_products_fact = Table(
-    'data_products_fact', Base.metadata,
-    Column('product_id', Integer, ForeignKey('products.id'), primary_key=True),
-    Column('fact_id', Integer, ForeignKey('fact.id'), primary_key=True)
-)
+    crel = lambda key, value: ProductFact(key=key, value=value)
+    _proxied = association_proxy("facts", "value", creator=crel)
+
+    @classmethod
+    def with_characteristic(cls, key, value):
+        return cls.facts.any(key=key, value=value)
 
 
 data_obs_fact = Table(
     'data_obs_fact', Base.metadata,
     Column('obs_id', Integer, ForeignKey('obs.id'), primary_key=True),
-    Column('fact_id', Integer, ForeignKey('fact.id'), primary_key=True)
-)
-
-
-recipe_parameters_fact = Table(
-    'recipe_parameters_fact', Base.metadata,
-    Column('param_value_id', Integer, ForeignKey('recipe_parameter_values.id'), primary_key=True),
     Column('fact_id', Integer, ForeignKey('fact.id'), primary_key=True)
 )
 
@@ -179,12 +163,20 @@ class RecipeParameters(Base):
     values = relationship("RecipeParameterValues", back_populates='parameter')
 
 
-class RecipeParameterValues(Base):
+class RecipeParameterValues(ProxiedDictMixin, Base):
     __tablename__ = 'recipe_parameter_values'
 
     id = Column(Integer, primary_key=True)
     param_id = Column(String,  ForeignKey("recipe_parameters.id"), nullable=False)
 
     content = Column(MagicJSON, nullable=False)
-    facts = relationship('Fact', secondary='recipe_parameters_fact')
     parameter = relationship("RecipeParameters")
+
+    facts = relationship("ParameterFact", collection_class=attribute_mapped_collection('key'))
+
+    crel = lambda key, value: ParameterFact(key=key, value=value)
+    _proxied = association_proxy("facts", "value", creator=crel)
+
+    @classmethod
+    def with_characteristic(cls, key, value):
+        return cls.facts.any(key=key, value=value)
