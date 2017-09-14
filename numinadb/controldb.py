@@ -97,4 +97,5 @@ class ControlSystem(basecontrol.ControlSystem):
 
         engine = create_engine(self.uri, echo=False)
 
-        Base.metadata.create_all(engine)
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)

@@ -34,7 +34,8 @@ from numina.user.clirundal import run_recipe
 from numina.core.oresult import ObservationResult
 
 from .model import Base
-from .model import Task
+from .model import Fact, FactString, FactInt, FactFloat
+from .model import Task, RecipeParameters, RecipeParameterValues
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
 
@@ -81,10 +82,14 @@ def register(subparsers, config):
     parser_db = sub.add_parser('db')
     # parser_run.set_defaults(command=mode_db)
     parser_db.add_argument('--initdb', nargs='?',
-                           default=db_default,
+                           default=None,
                            const=db_default,
                            metavar='URI', 
                            help='Create a database')
+
+    parser_db.add_argument('-c', '--task-control',
+        help='insert configuration file', metavar='FILE'
+    )
 
     parser_db.set_defaults(command=mode_db)
 
@@ -119,14 +124,73 @@ def register(subparsers, config):
 
 
 def mode_db(args, extra_args):
+    print(args)
     if args.initdb is not None:
         print('Create database in', args.initdb)
         create_db(uri=args.initdb)
 
+    if args.task_control is not None:
+        print('insert task-control values from', args.task_control)
+        import yaml
+        with open(args.task_control) as fd:
+            data = yaml.load(fd)
+
+        res = data.get('requirements', {})
+        uri = "sqlite:///processing.db"
+        engine = create_engine(uri, echo=False)
+        Session.configure(bind=engine)
+        session = Session()
+
+
+        for ins, data1 in res.items():
+            for plp, modes in data1.items():
+                for mode, params in modes.items():
+                    for param in params:
+                        #print(ins, plp, mode, param['name'], param['tags'], param['content'])
+                        dbpar = session.query(RecipeParameters).filter_by(instrument=ins,
+                                                                       pipeline=plp,
+                                                                       mode=mode,
+                                                                       name=param['name']).first()
+                        if dbpar is None:
+                            newpar = RecipeParameters()
+                            newpar.id = None
+                            newpar.instrument = ins
+                            newpar.pipeline = plp
+                            newpar.mode = mode
+                            newpar.name = param['name']
+                            dbpar = newpar
+                            session.add(dbpar)
+
+                        newval = RecipeParameterValues()
+                        newval.content = param['content']
+                        dbpar.values.append(newval)
+
+                        for k, v in param['tags'].items():
+                            if isinstance(v, str):
+                                print('string', v)
+                                FactAbs = FactString
+                            elif isinstance(v, int):
+                                FactAbs = FactInt
+                            elif isinstance(v, float):
+                                FactAbs = FactFloat
+                            else:
+                                print('something else, not supported')
+                                continue
+
+                            fact = session.query(Fact).filter_by(key=k, value=v).first()
+                            if fact is None:
+                                fact = FactAbs()
+                                fact.key = k
+                                fact.value = v
+
+                            newval.facts.append(fact)
+        session.commit()
+                        # Insert values
+
 
 def create_db(uri):
     engine = create_engine(uri, echo=False)
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(bind=engine)
 
 
 def mode_run_db(args, extra_args):
