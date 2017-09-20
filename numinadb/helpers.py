@@ -23,7 +23,7 @@ from __future__ import print_function
 
 import os
 import json
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 import numina.user.helpers
 import numina.core.qc
@@ -80,13 +80,14 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
                                       instrument_id='MEGARA',
                                       contents=relpath
                                       )
+
+                meta_info = prod.type.extract_meta_info(fullpath)
+                mm = datetime.strptime(meta_info['date_obs'], "%Y-%m-%dT%H:%M:%S.%f")
+                product.dateobs = mm
                 master_tags = prod.type.extract_tags(fullpath)
                 for k, v in master_tags.items():
-                    fact = session.query(Fact).filter_by(key=k, value=v).first()
-                    if fact is None:
-                        fact = Fact(key=k, value=v)
-
-                    product.facts.append(fact)
+                    newkey = str(k)
+                    product[newkey] = v
 
                 session.add(product)
 

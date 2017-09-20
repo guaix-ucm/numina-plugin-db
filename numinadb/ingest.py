@@ -49,6 +49,7 @@ def metadata_json(fname):
         result['instrument'] = data['instrument']
         result['numtype'] = data['type']
         result['uuid'] = data['uuid']
+        result['date_obs'] = data['meta_info']['origin']['date_obs']
     return result
 
 
@@ -65,7 +66,8 @@ def add_product_facts(session, prod, datadir):
         master_tags = prodtype.extract_tags(prod.contents)
 
     for k, v in master_tags.items():
-        prod[k] = v
+        print(k, v)
+        # prod[k] = v
 
 
 def add_ob_facts(session, ob, datadir):

@@ -137,8 +137,7 @@ class SqliteDAL(AbsDAL):
             for f in prod.facts:
                 pt[f.key] = f.value
             # print('product ', prod.id, 'tags', pt)
-            #print prod.facts
-            #pt = {}
+            print('FACTS', prod.facts)
             _logger.debug('found value with id %d', prod.id)
             _logger.debug('product tags are %s', pt)
 
@@ -156,24 +155,31 @@ class SqliteDAL(AbsDAL):
             msg = 'type %s compatible with tags %r not found' % (label, tags)
             raise NoResultFound(msg)
 
-    def search_param_req(self, req, instrument, mode, pipeline):
-
+    def search_param_type_tags(self, name, tipo, instrument, mode, pipeline, tags):
+        _logger.debug('query search_param_type_tags name=%s instrument=%s tags=%s pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
         session = Session()
-        # FIXME: pipeline is ignored...
         res = session.query(RecipeParameters).filter(
             RecipeParameters.instrument == instrument,
             RecipeParameters.pipeline == pipeline,
+            RecipeParameters.name == name,
             RecipeParameters.mode == mode).one_or_none()
-        if res:
-            mode_keys = res.parameters
-            try:
-                value = mode_keys[req.dest]
-                content = StoredParameter(value)
-                return content
-            except KeyError:
-                pass
+        _logger.debug('requested tags are %s', tags)
+        if res is None:
+            raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
+        for value in res.values:
+            pt = {}
+            for f in value.facts.values():
+                pt[f.key] = f.value
+            _logger.debug('found value with id %d', value.id)
+            _logger.debug('param tags are %s', pt)
 
-        raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
+            if tags_are_valid(pt, tags):
+                _logger.debug('tags are valid, param, id=%s', value.id)
+                _logger.debug('content is %s', value.content)
+                # this is a valid product
+                return StoredParameter(value.content)
+        else:
+            raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
 
     def obsres_from_oblock_id(self, obsid):
         # Search
@@ -201,8 +207,19 @@ class SqliteDAL(AbsDAL):
         return obsres
 
     def search_parameter(self, name, tipo, obsres):
-        print(name, tipo, obsres)
-        raise NoResultFound("Not yet")
+        # returns StoredProduct
+        instrument = obsres.instrument
+        mode = obsres.mode
+        tags = obsres.tags
+        pipeline = obsres.pipeline
+
+        if name in self.extra_data:
+            value = self.extra_data[name]
+            content = StoredParameter(value)
+            return content
+        else:
+            return self.search_param_type_tags(name, tipo, instrument, mode, pipeline, tags)
+
 
     def search_product(self, name, tipo, obsres):
         # returns StoredProduct

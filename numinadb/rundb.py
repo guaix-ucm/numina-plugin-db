@@ -354,11 +354,9 @@ def mode_ingest(args, extra_args):
     session = Session()
 
     for key, prod in reduction_results.items():
-        print('key=',key)
-        print('prod=',prod)
         datatype = prod[0]
         contents = prod[1]
-        prod_entry = DataProduct(instrument_id="MEGARA", datatype=datatype, contents=contents)
+        prod_entry = DataProduct(instrument_id="MEGARA", datatype=datatype, task_id=0, contents=contents)
         session.add(prod_entry)
 
         add_product_facts(session, prod_entry, datadir)

@@ -21,6 +21,8 @@
 
 import datetime
 
+import six
+
 from sqlalchemy.ext.declarative import declarative_base
 # from sqlalchemy import UniqueConstraint, ForeignKeyConstraint, PrimaryKeyConstraint, CheckConstraint, desc
 from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP, Unicode, UnicodeText
@@ -70,14 +72,15 @@ class ProductFact(PolymorphicVerticalProperty, Base):
     """A fact about an OB."""
 
     __tablename__ = 'product_facts'
-    product_id = Column(ForeignKey('products.id'), primary_key=True)
-    key = Column(String(64), primary_key=True)
+    owner_id = Column(ForeignKey('products.id'), primary_key=True)
+    key = Column(String, primary_key=True)
     type = Column(String(16))
 
     # add information about storage for different types
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
-    char_value = Column(UnicodeText, info={'type': (str, 'string')})
+    char_value = Column(String, info={'type': (six.string_types, 'string')})
+    unicode_value = Column(String, info={'type': (unicode, 'unicode')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
 
@@ -86,7 +89,7 @@ class ParameterFact(PolymorphicVerticalProperty, Base):
     """A fact about an OB."""
 
     __tablename__ = 'parameter_facts'
-    product_id = Column(ForeignKey('recipe_parameter_values.id'), primary_key=True)
+    owner_id = Column(ForeignKey('recipe_parameter_values.id'), primary_key=True)
     key = Column(String(64), primary_key=True)
     type = Column(String(16))
 
@@ -101,7 +104,7 @@ class ParameterFact(PolymorphicVerticalProperty, Base):
 class Frame(Base):
     __tablename__ = 'frames'
     id = Column(Integer, primary_key=True)
-    name = Column(String(10), unique=True, nullable=False)
+    name = Column(String(100), unique=True, nullable=False)
     ob_id = Column(String,  ForeignKey("obs.id"), nullable=False)
     ob = relationship("MyOb", back_populates='frames')
     #
@@ -124,7 +127,7 @@ class Task(Base):
     completion_time = Column(DateTime)
 
 
-class DataProduct(Base):
+class DataProduct(ProxiedDictMixin, Base):
     __tablename__ = 'products'
 
     id = Column(Integer, primary_key=True)
@@ -132,12 +135,20 @@ class DataProduct(Base):
     datatype = Column(String(45))
     task_id = Column(Integer, ForeignKey('tasks.id'))
     contents = Column(String(45))
+    dateobs = Column(DateTime)
     priority = Column(Integer, default=0)
 
     facts = relationship("ProductFact", collection_class=attribute_mapped_collection('key'))
 
     crel = lambda key, value: ProductFact(key=key, value=value)
     _proxied = association_proxy("facts", "value", creator=crel)
+
+    def __init__(self, instrument_id, datatype, task_id, contents, priority=0):
+        self.instrument_id = instrument_id
+        self.datatype =  datatype
+        self.task_id = task_id
+        self.contents = contents
+        self.priority = priority
 
     @classmethod
     def with_characteristic(cls, key, value):
