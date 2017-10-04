@@ -19,42 +19,65 @@
 
 """Ingestion of different types."""
 
-import os
 import json
+import datetime
 
+import numina.core.qc as qc
+from numina.core.products import DataFrameType, DataType, convert_date
+from numina.core.products import LinesCatalog
+from numina.core.products.structured import BaseStructuredCalibration
 from numina.util.context import working_directory
-
-import astropy.io.fits as fits
 import numina.drps
 
 from .model import MyOb, Frame, Fact
 
-def metadata_fits(fname):
-    result = {}
-    with fits.open(fname) as hdulist:
-        keys = ['DATE-OBS', 'VPH', 'INSMODE',
-                'obsmode', 'insconf', 'blckuuid',
-                'instrume', 'uuid', 'numtype']
-        for key in keys:
-            result[key] = hdulist[0].header.get(key)
+
+def metadata_fits(obj):
+    result = DataFrameType().extract_meta_info(obj)
+    return result
+
+
+def metadata_lis(obj):
+    """Extract metadata from serialized file"""
+    result = LinesCatalog().extract_meta_info(obj)
+    import os
+
+    head, tail = os.path.split(obj)
+    base, ext = os.path.splitext(tail)
+    tags = base.split('_')
+    result['instrument'] = 'MEGARA'
+    result['tags'] = {
+        u'vph': tags[0].decode('utf-8'),
+        u'speclamp': tags[1].decode('utf-8')
+    }
 
     return result
 
 
-def metadata_json(fname):
-    result = {}
-    with open(fname) as fd:
-        data = json.load(fd)
-        result['tags'] = data['tags']
-        result['instrument'] = data['instrument']
-        result['numtype'] = data['type']
-        result['uuid'] = data['uuid']
-        result['date_obs'] = data['meta_info']['origin']['date_obs']
+def metadata_json(obj):
+    """Extract metadata from serialized file"""
+
+    result = BaseStructuredCalibration().extract_meta_info(obj)
+
+    try:
+        with open(obj, 'r') as fd:
+            state = json.load(fd)
+    except IOError as e:
+        raise e
+
+    minfo = state['meta_info']
+    origin = minfo['origin']
+    date_obs = origin['date_obs']
+    result['instrument'] = state['instrument']
+    result['uuid'] = state['uuid']
+    result['tags'] = state['tags']
+    result['type'] = state['type']
+    result['observation_date'] = convert_date(date_obs)
+    result['origin'] = origin
     return result
 
 
-def add_product_facts(session, prod, datadir):
-
+def _add_product_facts(session, prod, datadir):
     drps = numina.drps.get_system_drps()
 
     this_drp = drps.query_by_name(prod.instrument_id)
@@ -62,30 +85,27 @@ def add_product_facts(session, prod, datadir):
 
     prodtype = pipeline.load_product_from_name(prod.datatype)
 
-    with working_directory(datadir):
-        master_tags = prodtype.extract_tags(prod.contents)
+    # with working_directory(datadir):
+    master_tags = prodtype.extract_tags(prod.contents)
 
     for k, v in master_tags.items():
-        print(k, v)
-        # prod[k] = v
+        prod[k] = v
 
 
 def add_ob_facts(session, ob, datadir):
-
     drps = numina.drps.get_system_drps()
     this_drp = drps.query_by_name(ob.instrument)
 
-    tagger = None
+    tagger_func = None
     for mode in this_drp.modes:
         if mode.key == ob.mode:
-            tagger = mode.tagger
+            tagger_func = mode.tagger
             break
-    if tagger:
-        current = os.getcwd()
-        os.chdir(datadir)
-        master_tags = tagger(ob)
-        os.chdir(current)
-        print('master_tags', master_tags)
+    if tagger_func:
+        with working_directory(datadir):
+            master_tags = tagger_func(ob)
+
+        # print('master_tags', master_tags)
         for k, v in master_tags.items():
             fact = session.query(Fact).filter_by(key=k, value=v).first()
             if fact is None:

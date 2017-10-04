@@ -48,8 +48,9 @@ def tags_are_valid(subset, superset):
 
 
 class SqliteDAL(AbsDAL):
-    def __init__(self, engine, basedir, datadir):
+    def __init__(self, dialect, engine, basedir, datadir):
         super(SqliteDAL, self).__init__()
+        self.dialect = dialect
         self.drps = numina.drps.get_system_drps()
         Session.configure(bind=engine)
         self.basedir = basedir
@@ -124,7 +125,7 @@ class SqliteDAL(AbsDAL):
 
         _logger.debug('query search_prod_type_tags type=%s instrument=%s tags=%s pipeline=%s',
                       tipo, ins, tags, pipeline)
-        drp = self.drps.query_by_name(ins)
+        # drp = self.drps.query_by_name(ins)
         label = tipo.name()
         # print('search prod', tipo, ins, tags, pipeline)
         session = Session()
@@ -134,10 +135,9 @@ class SqliteDAL(AbsDAL):
         for prod in res:
             pt = {}
             # TODO: facts should be a dictionary
-            for f in prod.facts:
-                pt[f.key] = f.value
+            for key, val in prod.facts.items():
+                pt[val.key] = val.value
             # print('product ', prod.id, 'tags', pt)
-            print('FACTS', prod.facts)
             _logger.debug('found value with id %d', prod.id)
             _logger.debug('product tags are %s', pt)
 
@@ -174,17 +174,20 @@ class SqliteDAL(AbsDAL):
             _logger.debug('param tags are %s', pt)
 
             if tags_are_valid(pt, tags):
-                _logger.debug('tags are valid, param, id=%s', value.id)
+                _logger.debug('tags are valid, param, id=%s, end', value.id)
                 _logger.debug('content is %s', value.content)
                 # this is a valid product
                 return StoredParameter(value.content)
         else:
             raise NoResultFound("No parameters for %s mode, pipeline %s", mode, pipeline)
 
-    def obsres_from_oblock_id(self, obsid):
+    def obsres_from_oblock_id(self, obsid, override_mode=None):
         # Search
         _logger.debug('query obsres_from_oblock_id with obsid=%s', obsid)
         obsres = self.search_oblock_from_id(obsid)
+
+        if override_mode:
+            obsres.mode = override_mode
 
         this_drp = self.drps.query_by_name(obsres.instrument)
 

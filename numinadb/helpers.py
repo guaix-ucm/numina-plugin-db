@@ -40,7 +40,7 @@ class ExtEncoder(json.JSONEncoder):
         if isinstance(obj, timedelta):
             return obj.total_seconds()
         elif isinstance(obj, numina.core.qc.QC):
-            return str(obj)
+            return obj.name
         else:
             return super(ExtEncoder, self).default(obj)
 
@@ -82,12 +82,15 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
                                       )
 
                 meta_info = prod.type.extract_meta_info(fullpath)
-                mm = datetime.strptime(meta_info['date_obs'], "%Y-%m-%dT%H:%M:%S.%f")
-                product.dateobs = mm
-                master_tags = prod.type.extract_tags(fullpath)
+                product.dateobs = meta_info['observation_date']
+                product.uuid = meta_info['uuid']
+                product.qc = meta_info['quality_control']
+                master_tags = meta_info['tags']
                 for k, v in master_tags.items():
-                    newkey = str(k)
-                    product[newkey] = v
+                    if isinstance(v, str):
+                        product[k] = v.decode('utf-8')
+                    else:
+                        product[k] = v
 
                 session.add(product)
 
