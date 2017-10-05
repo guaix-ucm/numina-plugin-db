@@ -15,7 +15,8 @@ setup(name='numinadb',
       packages=find_packages('.'),
       install_requires=[
           "six",
-          "sqlalchemy"
+          "sqlalchemy",
+          "numina"
       ],
       entry_points={
         'numina_plugins.1': [

@@ -32,6 +32,7 @@ from numina.dal.stored import StoredProduct
 from numina.util.context import working_directory
 from numina.user.clirundal import run_recipe
 from numina.core.oresult import ObservationResult
+import numina.store
 
 from .model import Base
 from .model import Fact
@@ -176,7 +177,10 @@ def mode_db(args, extra_args):
 
 def create_db(uri):
     engine = create_engine(uri, echo=False)
+    import megaradrp.db.model
     Base.metadata.create_all(bind=engine)
+    for i in Base.metadata.sorted_tables:
+        print(i)
 
 
 def mode_run_db(args, extra_args):
@@ -295,8 +299,14 @@ def mode_run_common_obs(args, extra_args):
     dbtask.state = 'FINISHED'
     session.commit()
 
+
+
+
 from .ingest import metadata_fits, add_ob_facts
 from .ingest import metadata_json, metadata_lis
+
+import megaradrp.db.model
+
 
 def mode_ingest(args, extra_args):
     print("mode ingest, path=", args.path)
@@ -329,7 +339,6 @@ def mode_ingest(args, extra_args):
                     continue
                 if blck_uuid is not None:
                     if blck_uuid not in obs_blocks:
-                        print(result)
                         # new block, insert
                         ob = ObservationResult(
                             instrument=result['instrument'],
@@ -366,7 +375,6 @@ def mode_ingest(args, extra_args):
     # insert OB in database
     db_uri = "sqlite:///processing.db"
     # engine = create_engine(args.db_uri, echo=False)
-    # engine = create_engine(db_uri, echo=False)
     engine = create_engine(db_uri, echo=False)
 
     Session.configure(bind=engine)
@@ -380,7 +388,7 @@ def mode_ingest(args, extra_args):
         recheck = prod[3]
         fullpath = contents
         relpath = fullpath # os.path.relpath(fullpath, self.runinfo['base_dir'])
-        prod_entry = DataProduct(instrument_id="MEGARA",
+        prod_entry = DataProduct(instrument_id=metadata_basic['instrument'],
                                  datatype=datatype,
                                  task_id=0,
                                  contents=relpath
@@ -391,18 +399,20 @@ def mode_ingest(args, extra_args):
             pipeline = this_drp.pipelines['default']
             prodtype = pipeline.load_product_from_name(prod_entry.datatype)
             # reread with correct type
-            metadata_basic = prodtype.extract_meta_info(prod_entry.contents)
+            obj = numina.store.load(prodtype, prod_entry.contents)
+            print(prodtype)
+            metadata_basic = prodtype.extract_meta_info(obj)
 
         prod_entry.dateobs = metadata_basic['observation_date']
         prod_entry.uuid = metadata_basic['uuid']
         prod_entry.qc = metadata_basic['quality_control']
-        session.add(prod_entry)
+        # session.add(prod_entry)
 
         for k, v in metadata_basic['tags'].items():
             prod_entry[k] = v
 
-
     session.commit()
+
     # return
     for key, obs in obs_blocks.items():
         now = datetime.datetime.now()
@@ -421,7 +431,6 @@ def mode_ingest(args, extra_args):
             newframe.exposure_time = meta['exptime']
             newframe.object = meta['object']
             ob.frames.append(newframe)
-            #session.add(newframe)
             ob.object = meta['object']
 
         query1 = session.query(Frame).join(MyOb).filter(MyOb.id == obs.id)
@@ -433,5 +442,16 @@ def mode_ingest(args, extra_args):
 
         # Facts
         add_ob_facts(session, ob, ingestdir)
+
+
+
+    insert_raw_cb = []
+    insert_raw_cb.append(megaradrp.db.model.function)
+
+    # raw frames insertion
+    for frame in frames:
+        print(frame)
+        for callb in insert_raw_cb:
+            callb(session, frame, frames[frame])
 
     session.commit()

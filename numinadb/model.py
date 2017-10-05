@@ -37,12 +37,11 @@ from sqlalchemy.ext.associationproxy import association_proxy
 import numina.core.dataframe
 import numina.core.qc as qc
 
+from numinadb.base import Base
+
 from .jsonsqlite import MagicJSON
 from .polydict import PolymorphicVerticalProperty
 from .proxydict import ProxiedDictMixin
-
-
-Base = declarative_base()
 
 
 class MyOb(Base):

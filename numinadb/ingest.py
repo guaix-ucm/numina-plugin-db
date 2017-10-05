@@ -33,7 +33,23 @@ from .model import MyOb, Frame, Fact
 
 
 def metadata_fits(obj):
-    result = DataFrameType().extract_meta_info(obj)
+
+    # FIXME: use plugin
+    datamodels = {}
+    import megaradrp.processing.datamodel
+    datamodels['MEGARA'] = megaradrp.processing.datamodel.MegaraDataModel()
+
+
+    # First. get instrument
+    objl = DataFrameType().convert(obj)
+
+    with objl.open() as hdulist:
+        # get instrument
+        instrument = hdulist[0].header['INSTRUME']
+
+    datamodel = datamodels[instrument]
+    result = DataFrameType(datamodel).extract_meta_info(obj)
+    print(result)
     return result
 
 
