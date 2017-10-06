@@ -26,6 +26,7 @@ import os
 import logging
 import datetime
 
+import pkg_resources
 from sqlalchemy import create_engine
 from numina.user.helpers import DiskStorageDefault
 from numina.dal.stored import StoredProduct
@@ -33,12 +34,15 @@ from numina.util.context import working_directory
 from numina.user.clirundal import run_recipe
 from numina.core.oresult import ObservationResult
 import numina.store
+import numina.drps
 
 from .model import Base
 from .model import Fact
 from .model import Task, RecipeParameters, RecipeParameterValues
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
+from .event import call_event
+
 
 _logger = logging.getLogger("numina.db")
 
@@ -127,10 +131,23 @@ def register(subparsers, config):
 
     parser_ingest.set_defaults(command=mode_ingest)
 
+    load_entry_points()
+
     return parser_run
 
 
+def load_entry_points():
+    entry = 'numinadb.extra.1'
+    for entry in pkg_resources.iter_entry_points(group=entry):
+        try:
+            entry.load()
+        except Exception as error:
+            print('Problem loading', entry, file=sys.stderr)
+            print("Error is: ", error, file=sys.stderr)
+
+
 def mode_db(args, extra_args):
+
     if args.initdb is not None:
         print('Create database in', args.initdb)
         create_db(uri=args.initdb)
@@ -177,10 +194,7 @@ def mode_db(args, extra_args):
 
 def create_db(uri):
     engine = create_engine(uri, echo=False)
-    import megaradrp.db.model
     Base.metadata.create_all(bind=engine)
-    for i in Base.metadata.sorted_tables:
-        print(i)
 
 
 def mode_run_db(args, extra_args):
@@ -300,15 +314,14 @@ def mode_run_common_obs(args, extra_args):
     session.commit()
 
 
-
-
 from .ingest import metadata_fits, add_ob_facts
 from .ingest import metadata_json, metadata_lis
-
-import megaradrp.db.model
-
+from .model import MyOb, Frame, Fact, DataProduct
 
 def mode_ingest(args, extra_args):
+
+    drps = numina.drps.get_system_drps()
+
     print("mode ingest, path=", args.path)
 
     obs_blocks = {}
@@ -326,7 +339,7 @@ def mode_ingest(args, extra_args):
             full_fname = os.path.join(dirname, fname)
             if ext == '.fits':
                 # something
-                result = metadata_fits(full_fname)
+                result = metadata_fits(full_fname, drps)
 
                 # numtype
                 numtype = result['type']
@@ -370,8 +383,8 @@ def mode_ingest(args, extra_args):
             else:
                 print("file not ingested", fname)
 
-    from .model import MyOb, Frame, Fact, DataProduct
-    import numina.drps
+
+
     # insert OB in database
     db_uri = "sqlite:///processing.db"
     # engine = create_engine(args.db_uri, echo=False)
@@ -379,7 +392,6 @@ def mode_ingest(args, extra_args):
 
     Session.configure(bind=engine)
     session = Session()
-    drps = numina.drps.get_system_drps()
 
     for key, prod in reduction_results.items():
         datatype = prod[0]
@@ -400,7 +412,6 @@ def mode_ingest(args, extra_args):
             prodtype = pipeline.load_product_from_name(prod_entry.datatype)
             # reread with correct type
             obj = numina.store.load(prodtype, prod_entry.contents)
-            print(prodtype)
             metadata_basic = prodtype.extract_meta_info(obj)
 
         prod_entry.dateobs = metadata_basic['observation_date']
@@ -443,15 +454,8 @@ def mode_ingest(args, extra_args):
         # Facts
         add_ob_facts(session, ob, ingestdir)
 
-
-
-    insert_raw_cb = []
-    insert_raw_cb.append(megaradrp.db.model.function)
-
     # raw frames insertion
     for frame in frames:
-        print(frame)
-        for callb in insert_raw_cb:
-            callb(session, frame, frames[frame])
+        call_event('on_ingest_raw_fits', session, frame, frames[frame])
 
     session.commit()

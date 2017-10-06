@@ -32,24 +32,19 @@ import numina.drps
 from .model import MyOb, Frame, Fact
 
 
-def metadata_fits(obj):
-
-    # FIXME: use plugin
-    datamodels = {}
-    import megaradrp.processing.datamodel
-    datamodels['MEGARA'] = megaradrp.processing.datamodel.MegaraDataModel()
-
+def metadata_fits(obj, drps):
 
     # First. get instrument
     objl = DataFrameType().convert(obj)
 
     with objl.open() as hdulist:
         # get instrument
-        instrument = hdulist[0].header['INSTRUME']
+        instrument_id = hdulist[0].header['INSTRUME']
 
-    datamodel = datamodels[instrument]
+    this_drp = drps.query_by_name(instrument_id)
+
+    datamodel = this_drp.datamodel
     result = DataFrameType(datamodel).extract_meta_info(obj)
-    print(result)
     return result
 
 
