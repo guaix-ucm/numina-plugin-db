@@ -19,7 +19,7 @@ setup(name='numinadb',
           "numina"
       ],
       entry_points={
-        'numina_plugins.1': [
+        'numina.plugins.1': [
             'rundb = numinadb.rundb:register',
             ],
       },
