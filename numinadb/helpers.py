@@ -23,26 +23,15 @@ from __future__ import print_function
 
 import os
 import json
-from datetime import timedelta, datetime
 
 import numina.user.helpers
-import numina.core.qc
-from numina.core.products import DataProductTag
+import numina.types.qc
+from numina.types.product import DataProductTag
+from numina.util.jsonencoder import ExtEncoder
 
 from .model import DataProduct
 from .model import Fact
 from .dal import Session
-
-
-class ExtEncoder(json.JSONEncoder):
-    """"Encode numpy.floats and numpy.integer"""
-    def default(self, obj):
-        if isinstance(obj, timedelta):
-            return obj.total_seconds()
-        elif isinstance(obj, numina.core.qc.QC):
-            return obj.name
-        else:
-            return super(ExtEncoder, self).default(obj)
 
 
 class ProcessingTask(numina.user.helpers.ProcessingTask):

@@ -20,12 +20,11 @@
 """Ingestion of different types."""
 
 import json
-import datetime
 
-import numina.core.qc as qc
-from numina.core.products import DataFrameType, DataType, convert_date
-from numina.core.products import LinesCatalog
-from numina.core.products.structured import BaseStructuredCalibration
+from numina.types.frame import DataFrameType
+from numina.util.convert import convert_date
+from numina.types.linescatalog import LinesCatalog
+from numina.types.structured import BaseStructuredCalibration
 from numina.util.context import working_directory
 import numina.drps
 
@@ -44,7 +43,7 @@ def metadata_fits(obj, drps):
     this_drp = drps.query_by_name(instrument_id)
 
     datamodel = this_drp.datamodel
-    result = DataFrameType(datamodel).extract_meta_info(obj)
+    result = DataFrameType(datamodel=datamodel).extract_meta_info(obj)
     return result
 
 

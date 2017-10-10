@@ -34,8 +34,8 @@ from sqlalchemy.orm import relationship, backref, synonym
 from sqlalchemy.orm.collections import attribute_mapped_collection
 from sqlalchemy.ext.associationproxy import association_proxy
 # from sqlalchemy.orm import validates
-import numina.core.dataframe
-import numina.core.qc as qc
+import numina.types.dataframe
+import numina.types.qc as qc
 
 from numinadb.base import Base
 
@@ -121,7 +121,7 @@ class Frame(Base):
         return fits.open(self.name, mode='readonly')
 
     def to_numina_frame(self):
-        return numina.core.dataframe.DataFrame(filename=self.filename)
+        return numina.types.dataframe.DataFrame(filename=self.filename)
 
 
 class Task(Base):
