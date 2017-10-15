@@ -68,24 +68,7 @@ def metadata_json(obj):
     """Extract metadata from serialized file"""
 
     result = BaseStructuredCalibration().extract_meta_info(obj)
-
-    try:
-        with open(obj, 'r') as fd:
-            state = json.load(fd)
-    except IOError as e:
-        raise e
-
-    minfo = state['meta_info']
-    origin = minfo['origin']
-    date_obs = origin['date_obs']
-    result['instrument'] = state['instrument']
-    result['uuid'] = state['uuid']
-    result['tags'] = state['tags']
-    result['type'] = state['type']
-    result['observation_date'] = convert_date(date_obs)
-    result['origin'] = origin
     return result
-
 
 def _add_product_facts(session, prod, datadir):
     drps = numina.drps.get_system_drps()

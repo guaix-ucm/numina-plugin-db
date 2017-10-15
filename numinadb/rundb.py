@@ -417,7 +417,7 @@ def mode_ingest(args, extra_args):
         prod_entry.dateobs = metadata_basic['observation_date']
         prod_entry.uuid = metadata_basic['uuid']
         prod_entry.qc = metadata_basic['quality_control']
-        # session.add(prod_entry)
+        session.add(prod_entry)
 
         for k, v in metadata_basic['tags'].items():
             prod_entry[k] = v

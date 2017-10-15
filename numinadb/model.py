@@ -128,10 +128,43 @@ class Task(Base):
     __tablename__ = 'tasks'
     id = Column(Integer, primary_key=True)
     ob_id = Column(Integer,  ForeignKey("obs.id"), nullable=False)
-    ob = relationship("MyOb")
+
+    create_time = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
     start_time = Column(DateTime, default=datetime.datetime.utcnow)
     state = Column(Enum('RUNNING', 'FINISHED'), default='RUNNING')
     completion_time = Column(DateTime)
+    parent_id = Column(Integer, ForeignKey('tasks.id'))
+
+    ob = relationship("MyOb", backref='tasks')
+    children = relationship(
+        "Task",
+        backref=backref('parent', remote_side=[id])
+    )
+
+
+class ReductionResult(Base):
+    __tablename__ = 'reduction_results'
+    id = Column(Integer, primary_key=True)
+    instrument_id = Column(String(10))
+
+    pipeline = Column(String(20))
+    obsmode = Column(String(40))
+    recipe = Column(String(100))
+
+    task_id = Column(Integer, ForeignKey('tasks.id'))
+    # dateobs = Column(DateTime)
+    qc = Column(Enum(qc.QC), default=qc.QC.UNKNOWN)
+    values = relationship("ReductionResultValue")
+
+
+class ReductionResultValue(Base):
+    __tablename__ = 'reduction_result_values'
+    id = Column(Integer, primary_key=True)
+    result_id = Column(Integer, ForeignKey('reduction_results.id'))
+    result = relationship("ReductionResult")
+    name = Column(String(45))
+    datatype = Column(String(45))
+    contents = Column(String(45))
 
 
 class DataProduct(ProxiedDictMixin, Base):
@@ -141,11 +174,14 @@ class DataProduct(ProxiedDictMixin, Base):
     instrument_id = Column(String(10))
     datatype = Column(String(45))
     task_id = Column(Integer, ForeignKey('tasks.id'))
-    uuid = Column(CHAR(32), unique=True)
+    result_id = Column(Integer, ForeignKey('reduction_result_values.id'))
+    uuid = Column(CHAR(32))
     dateobs = Column(DateTime)
     qc = Column(Enum(qc.QC), default=qc.QC.UNKNOWN)
     priority = Column(Integer, default=0)
     contents = Column(String(45))
+
+    result_value = relationship("ReductionResultValue")
 
     facts = relationship("ProductFact", collection_class=attribute_mapped_collection('key'))
 
