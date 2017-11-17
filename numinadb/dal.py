@@ -33,7 +33,7 @@ from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
 
 
-from .model import MyOb, DataProduct, RecipeParameters
+from .model import MyOb, DataProduct, RecipeParameters, ObservingBlockAlias
 
 Session = sessionmaker()
 
@@ -57,12 +57,20 @@ class SqliteDAL(AbsDAL):
         self.datadir = datadir
         self.extra_data = {}
 
-    def search_oblock_from_id(self, obsid):
+    def search_oblock_from_id(self, obsref):
         session = Session()
+
+        # Search possible alias
+        alias_res = session.query(ObservingBlockAlias).filter_by(alias=obsref).first()
+        if alias_res:
+            obsid = alias_res.uuid
+        else:
+            obsid = obsref
+
         res = session.query(MyOb).filter(MyOb.id == obsid).one()
         if res:
             thisframes = [frame.to_numina_frame() for frame in res.frames]
-            ob = ObservationResult(res.instrument, res.mode)
+            ob = ObservationResult(res.instrument_id, res.mode)
             ob.id = res.id
             ob.frames = thisframes
             ob.tags = res.facts
@@ -159,7 +167,7 @@ class SqliteDAL(AbsDAL):
         _logger.debug('query search_param_type_tags name=%s instrument=%s tags=%s pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
         session = Session()
         res = session.query(RecipeParameters).filter(
-            RecipeParameters.instrument == instrument,
+            RecipeParameters.instrument_id == instrument,
             RecipeParameters.pipeline == pipeline,
             RecipeParameters.name == name,
             RecipeParameters.mode == mode).one_or_none()

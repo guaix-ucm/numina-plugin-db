@@ -43,13 +43,13 @@ def metadata_fits(obj, drps):
     this_drp = drps.query_by_name(instrument_id)
 
     datamodel = this_drp.datamodel
-    result = DataFrameType(datamodel=datamodel).extract_meta_info(obj)
+    result = DataFrameType(datamodel=datamodel).extract_db_info(obj)
     return result
 
 
 def metadata_lis(obj):
     """Extract metadata from serialized file"""
-    result = LinesCatalog().extract_meta_info(obj)
+    result = LinesCatalog().extract_db_info(obj)
     import os
 
     head, tail = os.path.split(obj)
@@ -87,7 +87,7 @@ def _add_product_facts(session, prod, datadir):
 
 def add_ob_facts(session, ob, datadir):
     drps = numina.drps.get_system_drps()
-    this_drp = drps.query_by_name(ob.instrument)
+    this_drp = drps.query_by_name(ob.instrument_id)
 
     tagger_func = None
     for mode in this_drp.modes:

@@ -1,23 +1,13 @@
 #
 # Copyright 2016-2017 Universidad Complutense de Madrid
 #
-# This file is part of Numina
+# This file is part of Numina DB
 #
-# Numina is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Numina is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Numina.  If not, see <http://www.gnu.org/licenses/>.
+# SPDX-License-Identifier: GPL-3.0+
+# License-Filename: LICENSE.txt
 #
 
-"""User command line interface of Numina."""
+"""Model for SQL tables."""
 
 import datetime
 
@@ -44,19 +34,35 @@ from .polydict import PolymorphicVerticalProperty
 from .proxydict import ProxiedDictMixin
 
 
+class Instrument(Base):
+    __tablename__ = 'instruments'
+    name = Column(String(10), primary_key=True)
+
+
 class MyOb(Base):
     __tablename__ = 'obs'
 
     id = Column(String, primary_key=True)
-    instrument = Column(String, nullable=False)
+    instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
     mode = Column(String, nullable=False)
     object = Column(String)
     start_time = Column(DateTime)
     completion_time = Column(DateTime)
-    frames = relationship("Frame", back_populates='ob')
 
+    frames = relationship("Frame", back_populates='ob')
     facts = relationship('Fact', secondary='data_obs_fact')
+    instrument = relationship("Instrument")
+
+    parent = None
     children = []
+
+
+class ObservingBlockAlias(Base):
+    __tablename__ = 'obs_alias'
+
+    id = Column(Integer, primary_key=True)
+    uuid = Column(String, nullable=False) # this could be a ForeignKey("obs.id")
+    alias = Column(String, nullable=False, unique=True)
 
 
 class Fact(Base):
@@ -145,7 +151,7 @@ class Task(Base):
 class ReductionResult(Base):
     __tablename__ = 'reduction_results'
     id = Column(Integer, primary_key=True)
-    instrument_id = Column(String(10))
+    instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
 
     pipeline = Column(String(20))
     obsmode = Column(String(40))
@@ -155,6 +161,7 @@ class ReductionResult(Base):
     # dateobs = Column(DateTime)
     qc = Column(Enum(qc.QC), default=qc.QC.UNKNOWN)
     values = relationship("ReductionResultValue")
+    instrument = relationship("Instrument")
 
 
 class ReductionResultValue(Base):
@@ -171,7 +178,7 @@ class DataProduct(ProxiedDictMixin, Base):
     __tablename__ = 'products'
 
     id = Column(Integer, primary_key=True)
-    instrument_id = Column(String(10))
+    instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
     datatype = Column(String(45))
     task_id = Column(Integer, ForeignKey('tasks.id'))
     result_id = Column(Integer, ForeignKey('reduction_result_values.id'))
@@ -209,10 +216,10 @@ data_obs_fact = Table(
 
 class RecipeParameters(Base):
     __tablename__ = 'recipe_parameters'
-    __table_args__ = (UniqueConstraint('instrument', 'pipeline', 'mode', 'name'), )
+    __table_args__ = (UniqueConstraint('instrument_id', 'pipeline', 'mode', 'name'), )
 
     id = Column(Integer, primary_key=True)
-    instrument = Column(String, nullable=False)
+    instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
     pipeline = Column(String, default='default', nullable=False)
     mode = Column(String(100), nullable=False)
     name = Column(String(100), nullable=False)

@@ -30,8 +30,20 @@ from numina.types.product import DataProductTag
 from numina.util.jsonencoder import ExtEncoder
 
 from .model import DataProduct, ReductionResult, ReductionResultValue
-from .model import Fact
 from .dal import Session
+
+
+def store_to(result, where):
+    import numina.store
+    print('calling my store_to')
+    saveres = {}
+    for key, prod in result.stored().items():
+        val = getattr(result, key)
+
+        where.destination = prod.dest
+        saveres[key] = numina.store.dump(prod.type, val, where)
+
+    return saveres
 
 
 class ProcessingTask(numina.user.helpers.ProcessingTask):
@@ -39,8 +51,11 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
         super(ProcessingTask, self).__init__(obsres, runinfo)
 
     def store(self, where):
+        print('calling store to ', where)
         # save to disk the RecipeResult part and return the file to save it
-        saveres = self.result.store_to(where)
+        # saveres = self.result.store_to(where)
+
+        saveres = store_to(self.result, where)
 
         self.post_result_store(self.result, saveres)
 
@@ -61,8 +76,8 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
 
         result_db = ReductionResult()
 
-        print(self.runinfo)
-        print(self.observation)
+        # print(self.runinfo)
+        # print(self.observation)
         result_db.instrument_id = self.observation['instrument']
 
         result_db.pipeline = self.runinfo['pipeline']
@@ -94,7 +109,58 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
                                           contents=relpath
                                           )
                     product.result_value = val
-                    meta_info = prod.type.extract_meta_info(fullpath)
+                    internal_value = getattr(result, key)
+                    meta_info = internal_value.meta
+                    product.dateobs = meta_info['observation_date']
+                    product.uuid = meta_info['uuid']
+                    product.qc = meta_info['quality_control']
+                    master_tags = meta_info['tags']
+                    for k, v in master_tags.items():
+                        if isinstance(v, str):
+                            product[k] = v.decode('utf-8')
+                        else:
+                            product[k] = v
+
+                    session.add(product)
+
+        session.commit()
+
+    def pre_result_store(self, result, saveres):
+        session = Session()
+
+        result_db = ReductionResult()
+        result_db.instrument_id = self.observation['instrument']
+        result_db.pipeline = self.runinfo['pipeline']
+        result_db.obsmode = self.observation['mode']
+        result_db.recipe = self.runinfo['recipe_full_name']
+        result_db.task_id = self.runinfo['taskid']
+        # dateobs = Column(DateTime)
+        if hasattr(result, 'qc'):
+            result_db.qc = result.qc
+
+        session.add(result_db)
+
+        for key, prod in result.stored().items():
+            if prod.dest != 'qc':
+
+                val = ReductionResultValue()
+                fullpath = os.path.join(self.runinfo['results_dir'], saveres[prod.dest])
+                relpath = os.path.relpath(fullpath, self.runinfo['base_dir'])
+                val.name = prod.dest
+                val.datatype = prod.type.name()
+                val.contents = relpath
+                result_db.values.append(val)
+
+                if isinstance(prod.type, DataProductTag):
+                    product = DataProduct(datatype=prod.type.name(),
+                                          task_id=self.runinfo['taskid'],
+                                          instrument_id=self.observation['instrument'],
+                                          contents=relpath
+                                          )
+                    product.result_value = val
+                    internal_value = getattr(result, key)
+                    print('extract meta info', prod.type, fullpath, internal_value)
+                    meta_info = prod.type.extract_db_info(fullpath)
                     product.dateobs = meta_info['observation_date']
                     product.uuid = meta_info['uuid']
                     product.qc = meta_info['quality_control']
@@ -125,4 +191,3 @@ class WorkEnvironment(numina.user.helpers.WorkEnvironment):
             datadir = os.path.join(basedir, 'data')
 
         super(WorkEnvironment, self).__init__("1", basedir, workdir, resultsdir, datadir)
-

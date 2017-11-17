@@ -42,7 +42,7 @@ from .model import Task, RecipeParameters, RecipeParameterValues
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
 from .event import call_event
-
+from .control import mode_alias, mode_alias_del, mode_alias_list
 
 _logger = logging.getLogger("numina.db")
 
@@ -83,6 +83,20 @@ def register(subparsers, config):
         )
 
     sub = parser_run.add_subparsers(description='rundb-sub', dest='sub')
+
+    parser_alias = sub.add_parser('alias')
+    # Adding alias
+
+    parser_alias.add_argument('aliasname')
+
+    parser_alias.add_argument('uuid', nargs='?')
+
+    group_alias = parser_alias.add_mutually_exclusive_group()
+    group_alias.add_argument('-a', action='store_const', const=mode_alias, dest='command')
+    group_alias.add_argument('-d', action='store_const', const=mode_alias_del, dest='command')
+    group_alias.add_argument('-l', action='store_const', const=mode_alias_list, dest='command')
+
+    parser_alias.set_defaults(command=mode_alias)
 
     parser_db = sub.add_parser('db')
     # parser_run.set_defaults(command=mode_db)
@@ -169,14 +183,14 @@ def mode_db(args, extra_args):
             for plp, modes in data1.items():
                 for mode, params in modes.items():
                     for param in params:
-                        dbpar = session.query(RecipeParameters).filter_by(instrument=ins,
+                        dbpar = session.query(RecipeParameters).filter_by(instrument_id=ins,
                                                                        pipeline=plp,
                                                                        mode=mode,
                                                                        name=param['name']).first()
                         if dbpar is None:
                             newpar = RecipeParameters()
                             newpar.id = None
-                            newpar.instrument = ins
+                            newpar.instrument_id = ins
                             newpar.pipeline = plp
                             newpar.mode = mode
                             newpar.name = param['name']
@@ -412,7 +426,7 @@ def mode_ingest(args, extra_args):
             prodtype = pipeline.load_product_from_name(prod_entry.datatype)
             # reread with correct type
             obj = numina.store.load(prodtype, prod_entry.contents)
-            metadata_basic = prodtype.extract_meta_info(obj)
+            metadata_basic = prodtype.extract_db_info(obj)
 
         prod_entry.dateobs = metadata_basic['observation_date']
         prod_entry.uuid = metadata_basic['uuid']
@@ -427,7 +441,7 @@ def mode_ingest(args, extra_args):
     # return
     for key, obs in obs_blocks.items():
         now = datetime.datetime.now()
-        ob = MyOb(instrument=obs.instrument, mode=obs.mode, start_time=now)
+        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
         ob.id = obs.id
         session.add(ob)
 
