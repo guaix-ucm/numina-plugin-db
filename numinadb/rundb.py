@@ -29,22 +29,33 @@ import datetime
 import pkg_resources
 from sqlalchemy import create_engine
 from numina.user.helpers import DiskStorageDefault
-from numina.dal.stored import StoredProduct
 from numina.util.context import working_directory
 from numina.user.clirundal import run_recipe
-from numina.core.oresult import ObservationResult
-import numina.store
-import numina.drps
 
 from .model import Base
-from .model import Fact
 from .model import Task, RecipeParameters, RecipeParameterValues
 from .dal import SqliteDAL, Session
 from .helpers import ProcessingTask, WorkEnvironment
-from .event import call_event
 from .control import mode_alias, mode_alias_del, mode_alias_list
+from .ingest import ingest_ob_file, ingest_dir
+
 
 _logger = logging.getLogger("numina.db")
+
+
+db_info_keys = [
+        'instrument',
+        'object',
+        'observation_date',
+        'uuid',
+        'type',
+        'mode',
+        'exptime',
+        'darktime',
+        # 'insconf',
+        # 'blckuuid',
+        'quality_control'
+    ]
 
 
 def complete_config(config):
@@ -329,15 +340,9 @@ def mode_run_common_obs(args, extra_args):
     session.commit()
 
 
-from .ingest import metadata_fits, add_ob_facts
-from .ingest import metadata_json, metadata_lis
-from .ingest import ingest_ob_file
-from .model import MyOb, Frame, Fact, DataProduct
-
 def mode_ingest(args, extra_args):
 
-    drps = numina.drps.get_system_drps()
-    # insert OB in database
+    # FIXME: don't repeat myself
     db_uri = "sqlite:///processing.db"
     # engine = create_engine(args.db_uri, echo=False)
     engine = create_engine(db_uri, echo=False)
@@ -348,141 +353,6 @@ def mode_ingest(args, extra_args):
     if args.ob_file:
         ingest_ob_file(session, args.path)
         return
-
-    print("mode ingest, path=", args.path)
-
-    obs_blocks = {}
-    frames = {}
-    reduction_results = {}
-    ingestdir = args.path
-
-    for x in os.walk(ingestdir):
-        dirname, dirnames, files = x
-        # print('we are in', dirname)
-        # print('dirnames are', dirnames)
-        for fname in files:
-            # check based on extension
-            base, ext = os.path.splitext(fname)
-            full_fname = os.path.join(dirname, fname)
-            if ext == '.fits':
-                # something
-                result = metadata_fits(full_fname, drps)
-
-                # numtype
-                numtype = result['type']
-                blck_uuid = result.get('blckuuid')
-                if numtype is not None:
-                    # a calibration
-                    print("a calibration of type", numtype)
-                    reduction_uuid = result['uuid']
-                    reduction_results[reduction_uuid] = (numtype, full_fname, result, True)
-                    continue
-                if blck_uuid is not None:
-                    if blck_uuid not in obs_blocks:
-                        # new block, insert
-                        ob = ObservationResult(
-                            instrument=result['instrument'],
-                            mode=result['mode']
-                        )
-                        ob.id = blck_uuid
-                        ob.configuration = result['insconf']
-
-                        obs_blocks[blck_uuid] = ob
-
-                    uuid_frame = result['uuid']
-                    if uuid_frame not in frames:
-                        result['path'] = fname
-                        frames[uuid_frame] = result
-                        obs_blocks[blck_uuid].frames.append(result)
-
-            elif ext == '.json':
-                result = metadata_json(full_fname)
-                numtype = result['type']
-                print(full_fname, "a calibration of type", numtype)
-                reduction_uuid = result['uuid']
-                reduction_results[reduction_uuid] = (numtype, full_fname, result, False)
-            elif ext == '.lis':
-                result = metadata_lis(full_fname)
-                numtype = result['type']
-                print(full_fname, "a calibration of type", numtype)
-                reduction_uuid = result['uuid']
-                reduction_results[reduction_uuid] = (numtype, full_fname, result, False)
-            else:
-                print("file not ingested", fname)
-
-
-
-    # insert OB in database
-    db_uri = "sqlite:///processing.db"
-    # engine = create_engine(args.db_uri, echo=False)
-    engine = create_engine(db_uri, echo=False)
-
-    Session.configure(bind=engine)
-    session = Session()
-
-    for key, prod in reduction_results.items():
-        datatype = prod[0]
-        contents = prod[1]
-        metadata_basic = prod[2]
-        recheck = prod[3]
-        fullpath = contents
-        relpath = fullpath # os.path.relpath(fullpath, self.runinfo['base_dir'])
-        prod_entry = DataProduct(instrument_id=metadata_basic['instrument'],
-                                 datatype=datatype,
-                                 task_id=0,
-                                 contents=relpath
-                                 )
-
-        if recheck:
-            this_drp = drps.query_by_name(prod_entry.instrument_id)
-            pipeline = this_drp.pipelines['default']
-            prodtype = pipeline.load_product_from_name(prod_entry.datatype)
-            # reread with correct type
-            obj = numina.store.load(prodtype, prod_entry.contents)
-            metadata_basic = prodtype.extract_db_info(obj)
-
-        prod_entry.dateobs = metadata_basic['observation_date']
-        prod_entry.uuid = metadata_basic['uuid']
-        prod_entry.qc = metadata_basic['quality_control']
-        session.add(prod_entry)
-
-        for k, v in metadata_basic['tags'].items():
-            prod_entry[k] = v
-
-    session.commit()
-
-    # return
-    for key, obs in obs_blocks.items():
-        now = datetime.datetime.now()
-        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
-        ob.id = obs.id
-        session.add(ob)
-
-        for meta in obs.frames:
-            # Insert into DB
-            newframe = Frame()
-            newframe.name = meta['path']
-            newframe.uuid = meta['uuid']
-            newframe.start_time = meta['observation_date']
-            # No way of knowing when the readout ends...
-            newframe.completion_time = newframe.start_time + datetime.timedelta(seconds=meta['darktime'])
-            newframe.exposure_time = meta['exptime']
-            newframe.object = meta['object']
-            ob.frames.append(newframe)
-            ob.object = meta['object']
-
-        query1 = session.query(Frame).join(MyOb).filter(MyOb.id == obs.id)
-        res = query1.order_by(Frame.start_time).first()
-        ob.start_time = res.start_time
-
-        res = query1.order_by(Frame.completion_time.desc()).first()
-        ob.completion_time = res.completion_time
-
-        # Facts
-        add_ob_facts(session, ob, ingestdir)
-
-    # raw frames insertion
-    for frame in frames:
-        call_event('on_ingest_raw_fits', session, frame, frames[frame])
-
-    session.commit()
+    else:
+        ingest_dir(session, args.path)
+        return

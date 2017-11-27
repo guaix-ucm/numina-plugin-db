@@ -90,7 +90,7 @@ class ProductFact(PolymorphicVerticalProperty, Base):
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
     char_value = Column(String, info={'type': (six.string_types, 'string')})
-    unicode_value = Column(String, info={'type': (unicode, 'unicode')})
+    # unicode_value = Column(String, info={'type': (unicode, 'unicode')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
 

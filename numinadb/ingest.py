@@ -19,16 +19,23 @@
 
 """Ingestion of different types."""
 
-import json
+import uuid
+import datetime
+import os.path
 
+import yaml
+from numina.core.oresult import ObservationResult
 from numina.types.frame import DataFrameType
-from numina.util.convert import convert_date
 from numina.types.linescatalog import LinesCatalog
 from numina.types.structured import BaseStructuredCalibration
 from numina.util.context import working_directory
+import numina.store
 import numina.drps
 
-from .model import MyOb, Frame, Fact
+from .model import ObservingBlockAlias
+from .model import MyOb, Frame, Fact, DataProduct
+from .event import call_event
+
 
 db_info_keys = [
     'instrument',
@@ -62,7 +69,7 @@ def metadata_fits(obj, drps):
 
 def metadata_lis(obj):
     """Extract metadata from serialized file"""
-    result = LinesCatalog().extract_db_info(obj)
+    result = LinesCatalog().extract_db_info(obj, db_info_keys)
     import os
 
     head, tail = os.path.split(obj)
@@ -82,21 +89,6 @@ def metadata_json(obj):
 
     result = BaseStructuredCalibration().extract_meta_info(obj)
     return result
-
-
-def _add_product_facts(session, prod, datadir):
-    drps = numina.drps.get_system_drps()
-
-    this_drp = drps.query_by_name(prod.instrument_id)
-    pipeline = this_drp.pipelines['default']
-
-    prodtype = pipeline.load_product_from_name(prod.datatype)
-
-    # with working_directory(datadir):
-    master_tags = prodtype.extract_tags(prod.contents)
-
-    for k, v in master_tags.items():
-        prod[k] = v
 
 
 def add_ob_facts(session, ob, datadir):
@@ -121,13 +113,6 @@ def add_ob_facts(session, ob, datadir):
 
 
 def ingest_ob_file(session, path):
-    import yaml
-    import uuid
-    import datetime
-    import os.path
-
-    from numina.core.oresult import ObservationResult
-    from .model import ObservingBlockAlias
 
     drps = numina.drps.get_system_drps()
 
@@ -172,6 +157,7 @@ def ingest_ob_file(session, path):
         meta_frames = []
         for fname in obs.frames:
             full_fname = os.path.join(ingestdir, fname)
+            print(fname, full_fname)
             result = metadata_fits(full_fname, drps)
             #numtype = result['type']
             #blck_uuid = obs.uuid # result.get('blckuuid', obs.uuid)
@@ -216,6 +202,7 @@ def ingest_ob_file(session, path):
                 child = obs_blocks2[cid]
                 parent.children.append(child)
 
+    print('stage4')
     for key, obs in obs_blocks2.items():
         if obs.object is None:
             o1, s1, c1 = complete_recursive_first(obs)
@@ -245,3 +232,146 @@ def complete_recursive_idx(node, idx):
             return None
     else:
         return (node.object, node.start_time, node.completion_time)
+
+
+def ingest_dir(session, ingestdir):
+
+    drps = numina.drps.get_system_drps()
+    # insert OB in database
+
+    print("mode ingest dir, path=", ingestdir)
+
+    obs_blocks = {}
+    raw_frames = {}
+    reduction_results = {}
+
+    for x in os.walk(ingestdir):
+        dirname, dirnames, files = x
+        # print('we are in', dirname)
+        # print('dirnames are', dirnames)
+        for fname in files:
+            # check based on extension
+            base, ext = os.path.splitext(fname)
+            full_fname = os.path.join(dirname, fname)
+            if ext == '.fits':
+                # something
+                print("file ingested as FITS", full_fname)
+                result = metadata_fits(full_fname, drps)
+
+                # numtype
+                numtype = result['type']
+                blck_uuid = result.get('blckuuid')
+                if numtype is not None:
+                    # a calibration
+                    print("a calibration of type", numtype)
+                    reduction_uuid = result['uuid']
+                    print("a calibration of type {}, uuid {}".format(numtype, reduction_uuid))
+                    reduction_results[full_fname] = (numtype, full_fname, result, True)
+                    continue
+                if blck_uuid is not None:
+                    if blck_uuid not in obs_blocks:
+                        # new block, insert
+                        ob = ObservationResult(
+                            instrument=result['instrument'],
+                            mode=result['mode']
+                        )
+                        ob.id = blck_uuid
+                        ob.configuration = result['insconf']
+
+                        obs_blocks[blck_uuid] = ob
+
+                    uuid_frame = result['uuid']
+                    if uuid_frame not in raw_frames:
+                        result['path'] = fname
+                        raw_frames[uuid_frame] = result
+                        obs_blocks[blck_uuid].frames.append(result)
+
+            elif ext == '.json':
+                print("file ingested as JSON", fname)
+                result = metadata_json(full_fname)
+                numtype = result['type']
+                print(full_fname, "a calibration of type", numtype)
+                reduction_uuid = result['uuid']
+                reduction_results[reduction_uuid] = (numtype, full_fname, result, False)
+            elif ext == '.lis':
+                result = metadata_lis(full_fname)
+                numtype = result['type']
+                print(full_fname, "a calibration of type", numtype)
+                reduction_uuid = result['uuid']
+                reduction_results[reduction_uuid] = (numtype, full_fname, result, False)
+            else:
+                print("file not ingested", fname)
+
+    # insert OB in database
+    print('processing reduction_results')
+    for key, prod in reduction_results.items():
+
+        datatype = prod[0]
+        contents = prod[1]
+        metadata_basic = prod[2]
+        recheck = prod[3]
+        fullpath = contents
+        relpath = fullpath # os.path.relpath(fullpath, self.runinfo['base_dir'])
+        print('processing', relpath)
+        prod_entry = DataProduct(instrument_id=metadata_basic['instrument'],
+                                 datatype=datatype,
+                                 task_id=0,
+                                 contents=relpath
+                                 )
+
+        if recheck:
+            print('recheck metadata')
+            this_drp = drps.query_by_name(prod_entry.instrument_id)
+            pipeline = this_drp.pipelines['default']
+            prodtype = pipeline.load_product_from_name(prod_entry.datatype)
+            # reread with correct type
+            obj = numina.store.load(prodtype, prod_entry.contents)
+            # extend metadata
+            metadata_basic = prodtype.extract_db_info(obj, db_info_keys)
+
+        prod_entry.dateobs = metadata_basic['observation_date']
+        prod_entry.uuid = metadata_basic['uuid']
+        prod_entry.qc = metadata_basic['quality_control']
+        session.add(prod_entry)
+
+        print('compute tags')
+        for k, v in metadata_basic['tags'].items():
+            prod_entry[k] = v
+
+    session.commit()
+
+    # return
+    for key, obs in obs_blocks.items():
+        now = datetime.datetime.now()
+        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
+        ob.id = obs.id
+        session.add(ob)
+
+        for meta in obs.frames:
+            # Insert into DB
+            newframe = Frame()
+            newframe.name = meta['path']
+            newframe.uuid = meta['uuid']
+            newframe.start_time = meta['observation_date']
+            # No way of knowing when the readout ends...
+            newframe.completion_time = newframe.start_time + datetime.timedelta(seconds=meta['darktime'])
+            newframe.exposure_time = meta['exptime']
+            newframe.object = meta['object']
+            ob.frames.append(newframe)
+            ob.object = meta['object']
+
+        query1 = session.query(Frame).join(MyOb).filter(MyOb.id == obs.id)
+        res = query1.order_by(Frame.start_time).first()
+        ob.start_time = res.start_time
+
+        res = query1.order_by(Frame.completion_time.desc()).first()
+        ob.completion_time = res.completion_time
+
+        # Facts
+        add_ob_facts(session, ob, ingestdir)
+
+    # raw frames insertion
+    for frame in raw_frames:
+        call_event('on_ingest_raw_fits', session, frame, raw_frames[frame])
+
+    session.commit()
