@@ -46,6 +46,7 @@ class MyOb(Base):
     instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
     mode = Column(String, nullable=False)
     object = Column(String)
+    parent_id = Column(String, ForeignKey('obs.id'))
     start_time = Column(DateTime)
     completion_time = Column(DateTime)
 
@@ -53,8 +54,10 @@ class MyOb(Base):
     facts = relationship('Fact', secondary='data_obs_fact')
     instrument = relationship("Instrument")
 
-    parent = None
-    children = []
+    children = relationship(
+        "MyOb",
+        backref=backref('parent', remote_side=[id])
+    )
 
 
 class ObservingBlockAlias(Base):
