@@ -14,7 +14,9 @@ from sqlalchemy import create_engine
 from .dal import Session
 from .model import ObservingBlockAlias
 
+
 def mode_alias(args, extra_args):
+    # FIXME: DONT REPEAT MYSELF here
     uri = "sqlite:///processing.db"
     engine = create_engine(uri, echo=False)
     Session.configure(bind=engine)
@@ -53,6 +55,6 @@ def mode_alias_list(args, extra_args):
     engine = create_engine(uri, echo=False)
     Session.configure(bind=engine)
     session = Session()
-    dbpar = session.query(ObservingBlockAlias).filter_by(alias=args.aliasname)
+    dbpar = session.query(ObservingBlockAlias)
     for res in dbpar:
         print('alias:', res.alias, 'uuid:', res.uuid)
