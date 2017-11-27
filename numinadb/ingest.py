@@ -30,6 +30,19 @@ import numina.drps
 
 from .model import MyOb, Frame, Fact
 
+db_info_keys = [
+    'instrument',
+    'object',
+    'observation_date',
+    'uuid',
+    'type',
+    'mode',
+    'exptime',
+    'darktime',
+#    'insconf',
+#    'blckuuid',
+    'quality_control'
+]
 
 def metadata_fits(obj, drps):
 
@@ -43,7 +56,7 @@ def metadata_fits(obj, drps):
     this_drp = drps.query_by_name(instrument_id)
 
     datamodel = this_drp.datamodel
-    result = DataFrameType(datamodel=datamodel).extract_db_info(obj)
+    result = DataFrameType(datamodel=datamodel).extract_db_info(obj, db_info_keys)
     return result
 
 
@@ -69,6 +82,7 @@ def metadata_json(obj):
 
     result = BaseStructuredCalibration().extract_meta_info(obj)
     return result
+
 
 def _add_product_facts(session, prod, datadir):
     drps = numina.drps.get_system_drps()
@@ -104,3 +118,130 @@ def add_ob_facts(session, ob, datadir):
             if fact is None:
                 fact = Fact(key=k, value=v)
             ob.facts.append(fact)
+
+
+def ingest_ob_file(session, path):
+    import yaml
+    import uuid
+    import datetime
+    import os.path
+
+    from numina.core.oresult import ObservationResult
+    from .model import ObservingBlockAlias
+
+    drps = numina.drps.get_system_drps()
+
+    print("mode ingest, ob file, path=", path)
+
+    obs_blocks = {}
+    with open(path, 'r') as fd:
+        loaded_data = yaml.load_all(fd)
+
+        # complete the blocks...
+        for el in loaded_data:
+            obs_blocks[el['id']] = el
+
+    # FIXME: id could be UUID
+    obs_blocks1 = {}
+    for ob_id, block in obs_blocks.items():
+        ob = ObservationResult(
+            instrument=block['instrument'],
+            mode=block['mode']
+        )
+        ob.id = ob_id
+        ob.uuid = str(uuid.uuid4())
+        ob.configuration = 'default'
+        ob.children = block.get('children', [])
+        ob.frames = block.get('frames', [])
+        obs_blocks1[ob_id] = ob
+        # ignore frames for the moment
+
+    obs_blocks2 = {}
+    for key, obs in obs_blocks1.items():
+        now = datetime.datetime.now()
+        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
+        ob.id = obs.uuid
+        obs_blocks2[obs.id] = ob
+        # FIXME: add alias, only if needed
+        alias = ObservingBlockAlias(uuid=obs.uuid, alias=obs.id)
+
+        # add frames
+        # extract metadata from frames
+        # FIXME:
+        ingestdir = 'data'
+        meta_frames = []
+        for fname in obs.frames:
+            full_fname = os.path.join(ingestdir, fname)
+            result = metadata_fits(full_fname, drps)
+            #numtype = result['type']
+            #blck_uuid = obs.uuid # result.get('blckuuid', obs.uuid)
+            result['path'] = fname
+            meta_frames.append(result)
+
+        for meta in meta_frames:
+            # Insert into DB
+            newframe = Frame()
+            newframe.name = meta['path']
+            newframe.uuid = meta['uuid']
+            newframe.start_time = meta['observation_date']
+            # No way of knowing when the readout ends...
+            newframe.completion_time = newframe.start_time + datetime.timedelta(seconds=meta['darktime'])
+            newframe.exposure_time = meta['exptime']
+            newframe.object = meta['object']
+            ob.frames.append(newframe)
+
+        # set start/completion time from frames
+        if ob.frames:
+            ob.object = meta_frames[0]['object']
+            ob.start_time = ob.frames[0].start_time
+            ob.completion_time = ob.frames[-1].completion_time
+
+        # Facts
+        #add_ob_facts(session, ob, ingestdir)
+
+        # raw frames insertion
+        # for frame in frames:
+        # call_event('on_ingest_raw_fits', session, frame, frames[frame])
+
+        session.add(ob)
+        session.add(alias)
+
+    # processes children
+    for key, obs in obs_blocks1.items():
+        if obs.children:
+            # get parent
+            parent = obs_blocks2[key]
+            for cid in obs.children:
+                # get children
+                child = obs_blocks2[cid]
+                parent.children.append(child)
+
+    for key, obs in obs_blocks2.items():
+        if obs.object is None:
+            o1, s1, c1 = complete_recursive_first(obs)
+            o2, s2, c2 = complete_recursive_last(obs)
+            obs.object = o1
+            obs.start_time = s1
+            obs.completion_time = c2
+
+    session.commit()
+
+
+def complete_recursive_first(node):
+    return complete_recursive_idx(node, 0)
+
+
+def complete_recursive_last(node):
+    return complete_recursive_idx(node, -1)
+
+
+def complete_recursive_idx(node, idx):
+    if node.object is None:
+        if node.children:
+            value = complete_recursive_idx(node.children[idx], idx)
+            if value is not None:
+                return value
+        else:
+            return None
+    else:
+        return (node.object, node.start_time, node.completion_time)

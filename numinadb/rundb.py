@@ -141,6 +141,7 @@ def register(subparsers, config):
     parser_id.set_defaults(command=mode_run_db)
 
     parser_ingest = sub.add_parser('ingest')
+    parser_ingest.add_argument('--ob-file', action='store_true')
     parser_ingest.add_argument('path')
 
     parser_ingest.set_defaults(command=mode_ingest)
@@ -330,11 +331,23 @@ def mode_run_common_obs(args, extra_args):
 
 from .ingest import metadata_fits, add_ob_facts
 from .ingest import metadata_json, metadata_lis
+from .ingest import ingest_ob_file
 from .model import MyOb, Frame, Fact, DataProduct
 
 def mode_ingest(args, extra_args):
 
     drps = numina.drps.get_system_drps()
+    # insert OB in database
+    db_uri = "sqlite:///processing.db"
+    # engine = create_engine(args.db_uri, echo=False)
+    engine = create_engine(db_uri, echo=False)
+
+    Session.configure(bind=engine)
+    session = Session()
+
+    if args.ob_file:
+        ingest_ob_file(session, args.path)
+        return
 
     print("mode ingest, path=", args.path)
 
@@ -357,7 +370,7 @@ def mode_ingest(args, extra_args):
 
                 # numtype
                 numtype = result['type']
-                blck_uuid = result['blckuuid']
+                blck_uuid = result.get('blckuuid')
                 if numtype is not None:
                     # a calibration
                     print("a calibration of type", numtype)
