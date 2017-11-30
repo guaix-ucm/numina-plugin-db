@@ -248,8 +248,6 @@ def run_task(session, task, dal):
         task.completion_time = datetime.datetime.utcnow()
         session.commit()
 
-    # close
-
 def mode_run_common_obs(args, extra_args):
     """Observing mode processing mode of numina."""
 
@@ -258,7 +256,11 @@ def mode_run_common_obs(args, extra_args):
     session = Session()
 
     print('generate reduction tasks')
-    task = generate_reduction_tasks(session, args.obid)
+    request_params = {}
+    if args.mode_name:
+        request_params['mode_override'] = args.mode_name
+    request_params['pipeline'] = args.pipe_name
+    task = generate_reduction_tasks(session, args.obid, request_params)
 
     # query
     # tasks = session.query(DataProcessingTask).filter_by(label='root', state=0)
@@ -307,10 +309,13 @@ def reductionOB(**kwargs):
     #
     print('request is:', request)
     obid = request['id']
-    pipe_name = request.get('pipeline', 'default')
-    mode_name = request.get('mode')
+    pipe_name = request.get('pipe_name', 'default')
+    mode_name = request.get('mode_override')
 
-    return reductionOB_request(dal, taskid, obid, mode_name=mode_name)
+    return reductionOB_request(dal, taskid, obid,
+                               mode_name=mode_name,
+                               pipe_name=pipe_name
+                               )
 
 
 def reductionOB_request(dal, taskid, obid, mode_name=None, pipe_name='default'):
@@ -424,10 +429,13 @@ methods['reductionOB'] = reductionOB
 methods['reduction'] = reduction
 
 
-def generate_reduction_tasks(session, obid):
+def generate_reduction_tasks(session, obid, request_params):
     """Generate reduction tasks."""
 
     obsres = search_oblock_from_id(session, obid)
+
+    request = {"id": obid}
+    request.update(request_params)
 
     # Generate Main Reduction Task
     print('generate main task')
@@ -437,20 +445,23 @@ def generate_reduction_tasks(session, obid):
     dbtask.awaited = False
     dbtask.waiting = True
     dbtask.method = 'reduction'
-    dbtask.request = {"id": obid}
+    dbtask.request = request
     dbtask.ob = obsres
     print('generate done')
     session.add(dbtask)
     # Generate reductionOB
     #
     print('generate recursive')
-    recursive_tasks(dbtask, obsres)
+    recursive_tasks(dbtask, obsres, request_params)
 
     session.commit()
     return dbtask
 
 
-def recursive_tasks(parent_task, obsres):
+def recursive_tasks(parent_task, obsres, request_params):
+
+    request = {"id": obsres.id}
+    request.update(request_params)
 
     dbtask = DataProcessingTask()
     dbtask.host = 'localhost'
@@ -458,14 +469,14 @@ def recursive_tasks(parent_task, obsres):
     dbtask.awaited = False
     dbtask.waiting = False
     dbtask.method = 'reductionOB'
-    dbtask.request = {"id": obsres.id}
+    dbtask.request = request
     dbtask.ob = obsres
     if parent_task:
         dbtask.awaited = True
         parent_task.children.append(dbtask)
 
     for ob in obsres.children:
-        recursive_tasks(dbtask, ob)
+        recursive_tasks(dbtask, ob, request_params)
 
     if obsres.children:
         dbtask.waiting = True
