@@ -30,7 +30,6 @@ from numina.types.product import DataProductTag
 from numina.util.jsonencoder import ExtEncoder
 
 from .model import DataProduct, ReductionResult, ReductionResultValue
-from .dal import Session
 
 
 def store_to(result, where):
@@ -47,7 +46,8 @@ def store_to(result, where):
 
 
 class ProcessingTask(numina.user.helpers.ProcessingTask):
-    def __init__(self, obsres=None, runinfo=None):
+    def __init__(self, session, obsres=None, runinfo=None):
+        self.session = session
         super(ProcessingTask, self).__init__(obsres, runinfo)
 
     def store(self, where):
@@ -67,12 +67,22 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
         out['result'] = where.result
         out['runinfo'] = self.runinfo
 
+        logfile = 'processing.log'
+        relpathdir = os.path.relpath(self.runinfo['results_dir'], self.runinfo['base_dir'])
+
+        full_logfile = os.path.join(relpathdir, logfile)
+        full_task = os.path.join(relpathdir, where.task)
+        full_result = os.path.join(relpathdir, where.result)
+
         with open(where.task, 'w+') as fd:
             json.dump(out, fd, indent=2, cls=ExtEncoder)
-        return where.task
+
+        result = {'logs': full_logfile, 'task': full_task, 'result': full_result}
+
+        return result
 
     def post_result_store(self, result, saveres):
-        session = Session()
+        session = self.session
 
         result_db = ReductionResult()
 
@@ -116,20 +126,17 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
                     product.qc = meta_info['quality_control']
                     master_tags = meta_info['tags']
                     for k, v in master_tags.items():
-                        if isinstance(v, str):
-                            product[k] = v.decode('utf-8')
-                        else:
-                            product[k] = v
+                        product[k] = v
 
                     session.add(product)
 
         session.commit()
 
     def pre_result_store(self, result, saveres):
-        session = Session()
+        session = self.session
 
         result_db = ReductionResult()
-        result_db.instrument_id = self.observation['instrument']
+        result_db.instrument_id = self.observation['instrument'].name
         result_db.pipeline = self.runinfo['pipeline']
         result_db.obsmode = self.observation['mode']
         result_db.recipe = self.runinfo['recipe_full_name']
@@ -166,10 +173,7 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
                     product.qc = meta_info['quality_control']
                     master_tags = meta_info['tags']
                     for k, v in master_tags.items():
-                        if isinstance(v, str):
-                            product[k] = v.decode('utf-8')
-                        else:
-                            product[k] = v
+                        product[k] = v
 
                     session.add(product)
 
@@ -177,13 +181,13 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
 
 
 def build_mdir(taskid, obsid):
-    mdir = "task_{0}_{1}".format(taskid, obsid)
+    mdir = "task_{0:03d}_{1}".format(taskid, obsid)
     return mdir
 
 
 class WorkEnvironment(numina.user.helpers.WorkEnvironment):
-    def __init__(self, basedir, datadir, task):
-        mdir = build_mdir(task.id, task.ob_id)
+    def __init__(self, basedir, datadir, taskid, task_obid):
+        mdir = build_mdir(taskid, task_obid)
         workdir = os.path.join(basedir, mdir, 'work')
         resultsdir = os.path.join(basedir, mdir, 'results')
 

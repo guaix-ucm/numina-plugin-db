@@ -28,34 +28,28 @@ import datetime
 
 import pkg_resources
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from numina.user.helpers import DiskStorageDefault
 from numina.util.context import working_directory
 from numina.user.clirundal import run_recipe
 
 from .model import Base
-from .model import Task, RecipeParameters, RecipeParameterValues
-from .dal import SqliteDAL, Session
+from .model import DataProcessingTask
+
+from .dal import SqliteDAL, search_oblock_from_id
 from .helpers import ProcessingTask, WorkEnvironment
-from .control import mode_alias, mode_alias_del, mode_alias_list
-from .ingest import ingest_ob_file, ingest_dir
+from .control import mode_alias_add, mode_alias_del, mode_alias_list
+from .ingest import ingest_ob_file, ingest_dir, ingest_control_file
+
+
+Session = sessionmaker()
+
+runner = 'numina-plugin-db'
+runner_version = '1'
 
 
 _logger = logging.getLogger("numina.db")
-
-
-db_info_keys = [
-        'instrument',
-        'object',
-        'observation_date',
-        'uuid',
-        'type',
-        'mode',
-        'exptime',
-        'darktime',
-        # 'insconf',
-        # 'blckuuid',
-        'quality_control'
-    ]
 
 
 def complete_config(config):
@@ -88,28 +82,45 @@ def register(subparsers, config):
     if ddir_default == "":
         ddir_default = None
 
-    parser_run = subparsers.add_parser(
+    parser_rundb = subparsers.add_parser(
         'rundb',
         help='process a observation result from a database'
         )
 
-    sub = parser_run.add_subparsers(description='rundb-sub', dest='sub')
+    parser_rundb.add_argument('--db',
+                              default=db_default,
+                              dest='db_uri',
+                              metavar='URI',
+                              help='Path to the database'
+                              )
 
-    parser_alias = sub.add_parser('alias')
+    subdb = parser_rundb.add_subparsers(
+        title='DB Targets',
+        description='These are valid commands you can ask numina rundb to do.'
+    )
+
+    parser_alias = subdb.add_parser('alias', help='manage alias to OB names')
     # Adding alias
 
-    parser_alias.add_argument('aliasname')
+    subalias = parser_alias.add_subparsers(
+        title='Alias Targets',
+        help='alias commands'
+    )
 
-    parser_alias.add_argument('uuid', nargs='?')
+    parser_alias_add = subalias.add_parser('add', help='add alias')
+    parser_alias_add.add_argument('--force', action='store_true', help='force adding the alias')
+    parser_alias_add.add_argument('aliasname')
+    parser_alias_add.add_argument('uuid', nargs='?')
+    parser_alias_add.set_defaults(command=mode_alias, action='add')
 
-    group_alias = parser_alias.add_mutually_exclusive_group()
-    group_alias.add_argument('-a', action='store_const', const=mode_alias, dest='command')
-    group_alias.add_argument('-d', action='store_const', const=mode_alias_del, dest='command')
-    group_alias.add_argument('-l', action='store_const', const=mode_alias_list, dest='command')
+    parser_alias_del = subalias.add_parser('delete', help='delete alias')
+    parser_alias_del.add_argument('aliasname')
+    parser_alias_del.set_defaults(command=mode_alias, action='del')
 
-    parser_alias.set_defaults(command=mode_alias)
+    parser_alias_list = subalias.add_parser('list', help='list alias')
+    parser_alias_list.set_defaults(command=mode_alias, action='list')
 
-    parser_db = sub.add_parser('db')
+    parser_db = subdb.add_parser('db', help='manage database')
     # parser_run.set_defaults(command=mode_db)
     parser_db.add_argument('--initdb', nargs='?',
                            default=None,
@@ -117,21 +128,12 @@ def register(subparsers, config):
                            metavar='URI', 
                            help='Create a database')
 
-    parser_db.add_argument('-c', '--task-control',
-        help='insert configuration file', metavar='FILE'
-    )
-
     parser_db.set_defaults(command=mode_db)
 
-    parser_id = sub.add_parser('id')
+    parser_id = subdb.add_parser('id', help='run reductions based on OB id')
     parser_id.add_argument('obid')
     parser_id.add_argument('--query',
                            help='Query')
-    parser_id.add_argument('--db',
-                           default=db_default,
-                           dest='db_uri',
-                           metavar='URI',
-                           help='Path to the database')
     parser_id.add_argument(
         '-p', '--pipeline', dest='pipe_name',
         default='default', help='name of a pipeline'
@@ -151,15 +153,16 @@ def register(subparsers, config):
         )
     parser_id.set_defaults(command=mode_run_db)
 
-    parser_ingest = sub.add_parser('ingest')
+    parser_ingest = subdb.add_parser('ingest', help='ingest data in the database')
     parser_ingest.add_argument('--ob-file', action='store_true')
+    parser_ingest.add_argument('--control-file', action='store_true')
     parser_ingest.add_argument('path')
 
     parser_ingest.set_defaults(command=mode_ingest)
 
     load_entry_points()
 
-    return parser_run
+    return parser_rundb
 
 
 def load_entry_points():
@@ -178,45 +181,6 @@ def mode_db(args, extra_args):
         print('Create database in', args.initdb)
         create_db(uri=args.initdb)
 
-    if args.task_control is not None:
-        print('insert task-control values from', args.task_control)
-        import yaml
-        with open(args.task_control) as fd:
-            data = yaml.load(fd)
-
-        res = data.get('requirements', {})
-        uri = "sqlite:///processing.db"
-        engine = create_engine(uri, echo=False)
-        Session.configure(bind=engine)
-        session = Session()
-
-
-        for ins, data1 in res.items():
-            for plp, modes in data1.items():
-                for mode, params in modes.items():
-                    for param in params:
-                        dbpar = session.query(RecipeParameters).filter_by(instrument_id=ins,
-                                                                       pipeline=plp,
-                                                                       mode=mode,
-                                                                       name=param['name']).first()
-                        if dbpar is None:
-                            newpar = RecipeParameters()
-                            newpar.id = None
-                            newpar.instrument_id = ins
-                            newpar.pipeline = plp
-                            newpar.mode = mode
-                            newpar.name = param['name']
-                            dbpar = newpar
-                            session.add(dbpar)
-
-                        newval = RecipeParameterValues()
-                        newval.content = param['content']
-                        dbpar.values.append(newval)
-
-                        for k, v in param['tags'].items():
-                            newval[k] = v
-        session.commit()
-
 
 def create_db(uri):
     engine = create_engine(uri, echo=False)
@@ -228,37 +192,139 @@ def mode_run_db(args, extra_args):
     return 0
 
 
+def mode_alias(args, extra_args):
+
+    engine = create_engine(args.db_uri, echo=False)
+    Session.configure(bind=engine)
+    session = Session()
+
+    if args.action == 'add':
+        mode_alias_add(session, args.aliasname, args.uuid, force=args.force)
+
+    elif args.action == 'del':
+        mode_alias_del(session, args.aliasname)
+
+    elif args.action == 'list':
+        mode_alias_list(session)
+    else:
+        pass
+
+
+def run_task(session, task, dal):
+
+    if task.state == 2:
+        print('already done')
+        return
+
+    # Run on children first
+    for child in task.children:
+        run_task(session, child, dal)
+
+    # Check all my children are: awaited: False
+    # Check all my children are: state: 2 # FINISHED
+    for child in task.children:
+        if child.awaited:
+            print('im running and', child.id, 'is awaited')
+            raise ValueError('nor awaited')
+    else:
+        print('im running and nothing is awaited')
+        task.waiting  = False
+
+    # setup things
+    task.start_time = datetime.datetime.utcnow()
+    task.state = 1
+    task_method = methods[task.method]
+
+    try:
+        result = task_method(request=task.request, dal=dal, taskid=task.id)
+        task.result = result
+        # On completion
+        task.state = 2
+        task.awaited = False
+    except Exception:
+        task.state = 3
+        raise
+    finally:
+        task.completion_time = datetime.datetime.utcnow()
+        session.commit()
+
+    # close
+
 def mode_run_common_obs(args, extra_args):
     """Observing mode processing mode of numina."""
 
-    runner = 'numina-plugin-db'
-    runner_version = '1'
     engine = create_engine(args.db_uri, echo=False)
+    Session.configure(bind=engine)
+    session = Session()
+
+    print('generate reduction tasks')
+    task = generate_reduction_tasks(session, args.obid)
+
+    # query
+    # tasks = session.query(DataProcessingTask).filter_by(label='root', state=0)
+
     # DAL must use the database
     if args.datadir is None:
         datadir = os.path.join(args.basedir, 'data')
     else:
         datadir = args.datadir
 
-    dal = SqliteDAL(runner, engine, basedir=args.basedir, datadir=datadir)
+    dal = SqliteDAL(runner, session, basedir=args.basedir, datadir=datadir)
     _logger.debug("DAL is %s with datadir=%s", type(dal), datadir)
 
     # Directories with relevant data
-    _logger.debug("pipeline from CLI is %r", args.pipe_name)
-    pipe_name = args.pipe_name
+    pipe_name = 'default'
 
-    with working_directory(datadir):
-        obsres = dal.obsres_from_oblock_id(args.obid,
-                                           override_mode=args.mode_name
-                                           )
-
-    # Direct query to insert a new task
-    session = Session()
-    dbtask = Task(ob_id=obsres.id)
-    session.add(dbtask)
+    print('start')
+    run_task(session, task, dal)
+    print('end', task.completion_time)
     session.commit()
 
-    workenv = WorkEnvironment(args.basedir, datadir, dbtask)
+
+def mode_ingest(args, extra_args):
+
+    engine = create_engine(args.db_uri, echo=False)
+    Session.configure(bind=engine)
+    session = Session()
+
+    if args.control_file:
+        ingest_control_file(session, args.path)
+        return
+
+    if args.ob_file:
+        ingest_ob_file(session, args.path)
+        return
+    else:
+        ingest_dir(session, args.path)
+        return
+
+
+def reductionOB(**kwargs):
+    print('reductionOB')
+    dal = kwargs['dal']
+    taskid = kwargs['taskid']
+    request = kwargs['request']
+    #
+    print('request is:', request)
+    obid = request['id']
+    pipe_name = request.get('pipeline', 'default')
+    mode_name = request.get('mode')
+
+    return reductionOB_request(dal, taskid, obid, mode_name=mode_name)
+
+
+def reductionOB_request(dal, taskid, obid, mode_name=None, pipe_name='default'):
+
+    session = dal.session
+    datadir = dal.datadir
+    basedir = dal.basedir
+
+    with working_directory(datadir):
+        obsres = dal.obsres_from_oblock_id(obid,
+                                           override_mode=mode_name
+                                           )
+
+    workenv = WorkEnvironment(basedir, datadir, taskid, obid)
 
     with working_directory(workenv.datadir):
         recipe = dal.search_recipe_from_ob(obsres)
@@ -271,19 +337,21 @@ def mode_run_common_obs(args, extra_args):
         _logger.debug('update recipe runinfo')
         recipe.runinfo['runner'] = runner
         recipe.runinfo['runner_version'] = runner_version
-        recipe.runinfo['taskid'] = dbtask.id
+        recipe.runinfo['taskid'] = taskid
         recipe.runinfo['data_dir'] = workenv.datadir
         recipe.runinfo['work_dir'] = workenv.workdir
         recipe.runinfo['results_dir'] = workenv.resultsdir
         recipe.runinfo['base_dir'] = workenv.basedir
 
         try:
+            # uhmmm
+            obsres.taskid = taskid
             rinput = recipe.build_recipe_input(obsres, dal)
         except ValueError as err:
             _logger.error("during recipe input construction")
             for msg in err.args[0]:
                 _logger.error(msg)
-            sys.exit(0)
+            raise
 
         _logger.debug('recipe input created')
         # Build the recipe input data structure
@@ -308,7 +376,7 @@ def mode_run_common_obs(args, extra_args):
     task_control = dict(requirements={}, products={}, logger=logger_control)
 
     runinfo = {
-        'taskid': dbtask.id,
+        'taskid': taskid,
         'pipeline': pipe_name,
         'recipeclass': recipe.__class__,
         'workenv': workenv,
@@ -318,11 +386,18 @@ def mode_run_common_obs(args, extra_args):
         'instrument_configuration': None
     }
 
-    task = ProcessingTask(obsres, runinfo)
+    task = ProcessingTask(session, obsres, runinfo)
 
     # Copy files
     if True:
         _logger.debug('copy files to work directory')
+        workenv.sane_work()
+        workenv.copyfiles_stage1(obsres)
+        workenv.copyfiles_stage2(rinput)
+        workenv.adapt_obsres(obsres)
+    # link files
+    else:
+        _logger.debug('link files to work directory')
         workenv.sane_work()
         workenv.copyfiles_stage1(obsres)
         workenv.copyfiles_stage2(rinput)
@@ -332,27 +407,65 @@ def mode_run_common_obs(args, extra_args):
                                 workenv=workenv, task_control=task_control)
 
     where = DiskStorageDefault(resultsdir=workenv.resultsdir)
+    where.task = 'task.json'
+    where.result = 'result.json'
 
-    where.store(completed_task)
+    result = where.store(completed_task)
+    return result
 
-    dbtask.completion_time = datetime.datetime.now()
-    dbtask.state = 'FINISHED'
+
+def reduction(**kwargs):
+    print('reduction', kwargs)
+    return 'something'
+
+
+methods = {}
+methods['reductionOB'] = reductionOB
+methods['reduction'] = reduction
+
+
+def generate_reduction_tasks(session, obid):
+    """Generate reduction tasks."""
+
+    obsres = search_oblock_from_id(session, obid)
+
+    # Generate Main Reduction Task
+    print('generate main task')
+    dbtask = DataProcessingTask()
+    dbtask.host = 'localhost'
+    dbtask.label = 'root'
+    dbtask.awaited = False
+    dbtask.waiting = True
+    dbtask.method = 'reduction'
+    dbtask.request = {"id": obid}
+    dbtask.ob = obsres
+    print('generate done')
+    session.add(dbtask)
+    # Generate reductionOB
+    #
+    print('generate recursive')
+    recursive_tasks(dbtask, obsres)
+
     session.commit()
+    return dbtask
 
 
-def mode_ingest(args, extra_args):
+def recursive_tasks(parent_task, obsres):
 
-    # FIXME: don't repeat myself
-    db_uri = "sqlite:///processing.db"
-    # engine = create_engine(args.db_uri, echo=False)
-    engine = create_engine(db_uri, echo=False)
+    dbtask = DataProcessingTask()
+    dbtask.host = 'localhost'
+    dbtask.label = 'node'
+    dbtask.awaited = False
+    dbtask.waiting = False
+    dbtask.method = 'reductionOB'
+    dbtask.request = {"id": obsres.id}
+    dbtask.ob = obsres
+    if parent_task:
+        dbtask.awaited = True
+        parent_task.children.append(dbtask)
 
-    Session.configure(bind=engine)
-    session = Session()
+    for ob in obsres.children:
+        recursive_tasks(dbtask, ob)
 
-    if args.ob_file:
-        ingest_ob_file(session, args.path)
-        return
-    else:
-        ingest_dir(session, args.path)
-        return
+    if obsres.children:
+        dbtask.waiting = True

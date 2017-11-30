@@ -12,23 +12,17 @@
 import datetime
 
 import six
-
-from sqlalchemy.ext.declarative import declarative_base
-# from sqlalchemy import UniqueConstraint, ForeignKeyConstraint, PrimaryKeyConstraint, CheckConstraint, desc
 from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP, Unicode, UnicodeText
 from sqlalchemy import CHAR
 from sqlalchemy import Table, Column, ForeignKey, UniqueConstraint
 from sqlalchemy import Enum
-
 from sqlalchemy.orm import relationship, backref, synonym
 from sqlalchemy.orm.collections import attribute_mapped_collection
 from sqlalchemy.ext.associationproxy import association_proxy
-# from sqlalchemy.orm import validates
 import numina.types.dataframe
 import numina.types.qc as qc
 
 from numinadb.base import Base
-
 from .jsonsqlite import MagicJSON
 from .polydict import PolymorphicVerticalProperty
 from .proxydict import ProxiedDictMixin
@@ -39,7 +33,7 @@ class Instrument(Base):
     name = Column(String(10), primary_key=True)
 
 
-class MyOb(Base):
+class ObservingBlock(Base):
     __tablename__ = 'obs'
 
     id = Column(String, primary_key=True)
@@ -52,19 +46,36 @@ class MyOb(Base):
 
     frames = relationship("Frame", back_populates='ob')
     facts = relationship('Fact', secondary='data_obs_fact')
-    instrument = relationship("Instrument")
+    instrument = synonym("instrument_id")
+    instrument_ = relationship("Instrument")
 
     children = relationship(
-        "MyOb",
+        "ObservingBlock",
         backref=backref('parent', remote_side=[id])
     )
+    images = synonym("frames")
+    # Compatibility
+    requirements = []
+    results = []
+
+    def metadata_with(self, datamodel):
+        origin = {}
+        imginfo = datamodel.gather_info_oresult(self)
+        origin['info'] = imginfo
+        first = imginfo[0]
+        origin["block_uuid"] = first['block_uuid']
+        origin['insconf_uuid'] = first['insconf_uuid']
+        origin['date_obs'] = first['observation_date']
+        origin['observation_date'] = first['observation_date']
+        origin['frames'] = [img['imgid'] for img in imginfo]
+        return origin
 
 
 class ObservingBlockAlias(Base):
     __tablename__ = 'obs_alias'
 
     id = Column(Integer, primary_key=True)
-    uuid = Column(String, nullable=False) # this could be a ForeignKey("obs.id")
+    uuid = Column(String, ForeignKey("obs.id"), nullable=False)
     alias = Column(String, nullable=False, unique=True)
 
 
@@ -89,7 +100,10 @@ class ProductFact(PolymorphicVerticalProperty, Base):
     # add information about storage for different types
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
-    char_value = Column(String, info={'type': (six.string_types, 'string')})
+    if six.PY2:
+        char_value = Column(String, info={'type': ((str, unicode), 'string')})
+    else:
+        char_value = Column(String, info={'type': (str, 'string')})
     # unicode_value = Column(String, info={'type': (unicode, 'unicode')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
@@ -106,7 +120,10 @@ class ParameterFact(PolymorphicVerticalProperty, Base):
     # add information about storage for different types
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
-    char_value = Column(UnicodeText, info={'type': (str, 'string')})
+    if six.PY2:
+        char_value = Column(String, info={'type': ((str, unicode), 'string')})
+    else:
+        char_value = Column(String, info={'type': (str, 'string')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
 
@@ -121,7 +138,7 @@ class Frame(Base):
     start_time = Column(DateTime)
     exposure_time = Column(Float)
     completion_time = Column(DateTime)
-    ob = relationship("MyOb", back_populates='frames')
+    ob = relationship("ObservingBlock", back_populates='frames')
     #
     filename = synonym("name")
 
@@ -133,22 +150,30 @@ class Frame(Base):
         return numina.types.dataframe.DataFrame(filename=self.filename)
 
 
-class Task(Base):
-    __tablename__ = 'tasks'
+class DataProcessingTask(Base):
+    __tablename__ = 'dp_task'
     id = Column(Integer, primary_key=True)
-    ob_id = Column(Integer,  ForeignKey("obs.id"), nullable=False)
-
+    host = Column(String(45))
+    state = Column(Integer, default=0)
     create_time = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
-    start_time = Column(DateTime, default=datetime.datetime.utcnow)
-    state = Column(Enum('RUNNING', 'FINISHED'), default='RUNNING')
+    start_time = Column(DateTime)
     completion_time = Column(DateTime)
-    parent_id = Column(Integer, ForeignKey('tasks.id'))
 
-    ob = relationship("MyOb", backref='tasks')
-    children = relationship(
-        "Task",
-        backref=backref('parent', remote_side=[id])
-    )
+    # obsresult_node_id = Column(Integer, ForeignKey('observation_result.id'), nullable=False)
+    ob_id = Column(String, ForeignKey("obs.id"), nullable=False)
+
+    parent_id = Column(Integer, ForeignKey('dp_task.id'))
+    label = Column(String(255))
+    waiting = Column(Boolean)
+    awaited = Column(Boolean)
+    method = Column(UnicodeText)
+    request = Column(MagicJSON)
+    result = Column(MagicJSON)
+
+    # obsresult_node = relationship("ObservationResult", backref='tasks')
+    ob = relationship("ObservingBlock", backref='tasks')
+
+    children = relationship("DataProcessingTask", backref=backref('parent', remote_side=[id]))
 
 
 class ReductionResult(Base):
@@ -160,17 +185,18 @@ class ReductionResult(Base):
     obsmode = Column(String(40))
     recipe = Column(String(100))
 
-    task_id = Column(Integer, ForeignKey('tasks.id'))
-    # dateobs = Column(DateTime)
+    task_id = Column(Integer, ForeignKey('dp_task.id'), nullable=False)
     qc = Column(Enum(qc.QC), default=qc.QC.UNKNOWN)
+
     values = relationship("ReductionResultValue")
     instrument = relationship("Instrument")
+    task = relationship("DataProcessingTask", backref=backref('reduction_result'))
 
 
 class ReductionResultValue(Base):
     __tablename__ = 'reduction_result_values'
     id = Column(Integer, primary_key=True)
-    result_id = Column(Integer, ForeignKey('reduction_results.id'))
+    result_id = Column(Integer, ForeignKey('reduction_results.id'), nullable=False)
     result = relationship("ReductionResult")
     name = Column(String(45))
     datatype = Column(String(45))
@@ -183,7 +209,7 @@ class DataProduct(ProxiedDictMixin, Base):
     id = Column(Integer, primary_key=True)
     instrument_id = Column(String(10), ForeignKey("instruments.name"), nullable=False)
     datatype = Column(String(45))
-    task_id = Column(Integer, ForeignKey('tasks.id'))
+    task_id = Column(Integer, ForeignKey('dp_task.id'))
     result_id = Column(Integer, ForeignKey('reduction_result_values.id'))
     uuid = Column(CHAR(32))
     dateobs = Column(DateTime)

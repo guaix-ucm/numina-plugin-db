@@ -8,7 +8,7 @@ import datetime
 import megaradrp.simulation.control as basecontrol
 
 from numinadb.dal import Session
-from numinadb.model import MyOb, Frame, Base, Fact
+from numinadb.model import ObservingBlock, Frame, Base, Fact
 from sqlalchemy import create_engine
 
 
@@ -41,7 +41,7 @@ class ControlSystem(basecontrol.ControlSystem):
 
         session = Session()
         now = datetime.datetime.now()
-        ob = MyOb(instrument=self.ins, mode=self.mode, start_time=now)
+        ob = ObservingBlock(instrument=self.ins, mode=self.mode, start_time=now)
         session.add(ob)
         session.commit() # So that we have ob.id
         iterf = thiss.run(self, exposure, repeat)

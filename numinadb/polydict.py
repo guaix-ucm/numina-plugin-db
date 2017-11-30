@@ -105,7 +105,11 @@ def on_new_class(mapper, cls_):
         col = mapper.c[k]
         if 'type' in col.info:
             python_type, discriminator = col.info['type']
-            info_dict[python_type] = (k, discriminator)
+            if isinstance(python_type, tuple):
+                for sub in python_type:
+                    info_dict[sub] = (k, discriminator)
+            else:
+                info_dict[python_type] = (k, discriminator)
             info_dict[discriminator] = (k, discriminator)
     cls_.type_map = info_dict
 

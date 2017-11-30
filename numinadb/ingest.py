@@ -19,6 +19,8 @@
 
 """Ingestion of different types."""
 
+from __future__ import print_function
+
 import uuid
 import datetime
 import os.path
@@ -32,12 +34,13 @@ from numina.util.context import working_directory
 import numina.store
 import numina.drps
 
+from .model import RecipeParameters, RecipeParameterValues
 from .model import ObservingBlockAlias
-from .model import MyOb, Frame, Fact, DataProduct
+from .model import ObservingBlock, Frame, Fact, DataProduct
 from .event import call_event
 
 
-db_info_keys = [
+base_db_info_keys = [
     'instrument',
     'object',
     'observation_date',
@@ -46,8 +49,8 @@ db_info_keys = [
     'mode',
     'exptime',
     'darktime',
-#    'insconf',
-#    'blckuuid',
+    'insconf',
+    'blckuuid',
     'quality_control'
 ]
 
@@ -63,14 +66,14 @@ def metadata_fits(obj, drps):
     this_drp = drps.query_by_name(instrument_id)
 
     datamodel = this_drp.datamodel
-    result = DataFrameType(datamodel=datamodel).extract_db_info(obj, db_info_keys)
+    keys = datamodel.db_info_keys
+    result = DataFrameType(datamodel=datamodel).extract_db_info(obj, keys)
     return result
 
 
 def metadata_lis(obj):
     """Extract metadata from serialized file"""
-    result = LinesCatalog().extract_db_info(obj, db_info_keys)
-    import os
+    result = LinesCatalog().extract_db_info(obj, base_db_info_keys)
 
     head, tail = os.path.split(obj)
     base, ext = os.path.splitext(tail)
@@ -112,6 +115,42 @@ def add_ob_facts(session, ob, datadir):
             ob.facts.append(fact)
 
 
+def ingest_control_file(session, path):
+
+    print('insert task-control values from', path)
+
+    with open(path) as fd:
+        data = yaml.load(fd)
+
+    res = data.get('requirements', {})
+
+    for ins, data1 in res.items():
+        for plp, modes in data1.items():
+            for mode, params in modes.items():
+                for param in params:
+                    dbpar = session.query(RecipeParameters).filter_by(instrument_id=ins,
+                                                                   pipeline=plp,
+                                                                   mode=mode,
+                                                                   name=param['name']).first()
+                    if dbpar is None:
+                        newpar = RecipeParameters()
+                        newpar.id = None
+                        newpar.instrument_id = ins
+                        newpar.pipeline = plp
+                        newpar.mode = mode
+                        newpar.name = param['name']
+                        dbpar = newpar
+                        session.add(dbpar)
+
+                    newval = RecipeParameterValues()
+                    newval.content = param['content']
+                    dbpar.values.append(newval)
+
+                    for k, v in param['tags'].items():
+                        newval[k] = v
+    session.commit()
+
+
 def ingest_ob_file(session, path):
 
     drps = numina.drps.get_system_drps()
@@ -144,7 +183,7 @@ def ingest_ob_file(session, path):
     obs_blocks2 = {}
     for key, obs in obs_blocks1.items():
         now = datetime.datetime.now()
-        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
+        ob = ObservingBlock(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
         ob.id = obs.uuid
         obs_blocks2[obs.id] = ob
         # FIXME: add alias, only if needed
@@ -255,7 +294,7 @@ def ingest_dir(session, ingestdir):
             full_fname = os.path.join(dirname, fname)
             if ext == '.fits':
                 # something
-                print("file ingested as FITS", full_fname)
+                print("file processed as FITS", full_fname)
                 result = metadata_fits(full_fname, drps)
 
                 # numtype
@@ -268,8 +307,11 @@ def ingest_dir(session, ingestdir):
                     print("a calibration of type {}, uuid {}".format(numtype, reduction_uuid))
                     reduction_results[full_fname] = (numtype, full_fname, result, True)
                     continue
+                else:
+                    print('raw data')
                 if blck_uuid is not None:
                     if blck_uuid not in obs_blocks:
+                        print('added new OB', blck_uuid)
                         # new block, insert
                         ob = ObservationResult(
                             instrument=result['instrument'],
@@ -323,11 +365,19 @@ def ingest_dir(session, ingestdir):
             print('recheck metadata')
             this_drp = drps.query_by_name(prod_entry.instrument_id)
             pipeline = this_drp.pipelines['default']
+            db_info_keys = this_drp.datamodel.db_info_keys
             prodtype = pipeline.load_product_from_name(prod_entry.datatype)
             # reread with correct type
             obj = numina.store.load(prodtype, prod_entry.contents)
             # extend metadata
             metadata_basic = prodtype.extract_db_info(obj, db_info_keys)
+
+        # check if is already inserted
+        res = session.query(DataProduct).filter_by(uuid=metadata_basic['uuid']).first()
+
+        if res is not None:
+            print('this product is already inserted', metadata_basic['uuid'])
+            continue
 
         prod_entry.dateobs = metadata_basic['observation_date']
         prod_entry.uuid = metadata_basic['uuid']
@@ -340,10 +390,17 @@ def ingest_dir(session, ingestdir):
 
     session.commit()
 
-    # return
+    print('processing observing blocks')
     for key, obs in obs_blocks.items():
+
+        res = session.query(ObservingBlock).filter_by(id=obs.id).first()
+
+        if res is not None:
+            print('OB already inserted', obs.id)
+            continue
+
         now = datetime.datetime.now()
-        ob = MyOb(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
+        ob = ObservingBlock(instrument_id=obs.instrument, mode=obs.mode, start_time=now)
         ob.id = obs.id
         session.add(ob)
 
@@ -360,12 +417,14 @@ def ingest_dir(session, ingestdir):
             ob.frames.append(newframe)
             ob.object = meta['object']
 
-        query1 = session.query(Frame).join(MyOb).filter(MyOb.id == obs.id)
+        query1 = session.query(Frame).join(ObservingBlock).filter(ObservingBlock.id == obs.id)
         res = query1.order_by(Frame.start_time).first()
-        ob.start_time = res.start_time
+        if res:
+            ob.start_time = res.start_time
 
         res = query1.order_by(Frame.completion_time.desc()).first()
-        ob.completion_time = res.completion_time
+        if res:
+            ob.completion_time = res.completion_time
 
         # Facts
         add_ob_facts(session, ob, ingestdir)

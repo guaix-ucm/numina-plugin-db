@@ -23,19 +23,17 @@
 import os
 import logging
 
-from sqlalchemy.orm import sessionmaker
-
+import six
 import numina.drps
 from numina.store import load
 from numina.dal import AbsDAL
 from numina.exceptions import NoResultFound
 from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
+from numina.core import DataFrameType
 
-
-from .model import MyOb, DataProduct, RecipeParameters, ObservingBlockAlias
-
-Session = sessionmaker()
+from .model import ObservingBlock, DataProduct, RecipeParameters, ObservingBlockAlias
+from .model import DataProcessingTask, ReductionResult
 
 _logger = logging.getLogger("numina.db.dal")
 
@@ -47,38 +45,35 @@ def tags_are_valid(subset, superset):
     return True
 
 
+def search_oblock_from_id(session, obsref):
+
+    # Search possible alias
+    alias_res = session.query(ObservingBlockAlias).filter_by(alias=obsref).first()
+    if alias_res:
+        obsid = alias_res.uuid
+    else:
+        obsid = obsref
+
+    res = session.query(ObservingBlock).filter(ObservingBlock.id == obsid).one()
+    if res:
+        return res
+    else:
+        raise NoResultFound("oblock with id %d not found" % obsid)
+
+
 class SqliteDAL(AbsDAL):
-    def __init__(self, dialect, engine, basedir, datadir):
+    def __init__(self, dialect, session, basedir, datadir):
         super(SqliteDAL, self).__init__()
         self.dialect = dialect
         self.drps = numina.drps.get_system_drps()
-        Session.configure(bind=engine)
+        self.session = session
         self.basedir = basedir
         self.datadir = datadir
         self.extra_data = {}
 
     def search_oblock_from_id(self, obsref):
-        session = Session()
 
-        # Search possible alias
-        alias_res = session.query(ObservingBlockAlias).filter_by(alias=obsref).first()
-        if alias_res:
-            obsid = alias_res.uuid
-        else:
-            obsid = obsref
-
-        res = session.query(MyOb).filter(MyOb.id == obsid).one()
-        if res:
-            thisframes = [frame.to_numina_frame() for frame in res.frames]
-            ob = ObservationResult(res.instrument_id, res.mode)
-            ob.id = res.id
-            ob.frames = thisframes
-            ob.tags = res.facts
-            # FIXME
-            ob.configuration = "default"
-            return ob
-        else:
-            raise NoResultFound("oblock with id %d not found" % obsid)
+        return search_oblock_from_id(self.session, obsref)
 
     def search_recipe(self, ins, mode, pipeline):
 
@@ -108,7 +103,10 @@ class SqliteDAL(AbsDAL):
         return recipe_fqn
 
     def search_recipe_from_ob(self, ob):
-        ins = ob.instrument
+        try:
+            ins = ob.instrument.name
+        except AttributeError:
+            ins = ob.instrument
         mode = ob.mode
         pipeline = ob.pipeline
         return self.search_recipe(ins, mode, pipeline)
@@ -136,7 +134,7 @@ class SqliteDAL(AbsDAL):
         # drp = self.drps.query_by_name(ins)
         label = tipo.name()
         # print('search prod', tipo, ins, tags, pipeline)
-        session = Session()
+        session = self.session
         # FIXME: and instrument == ins
         res = session.query(DataProduct).filter(DataProduct.datatype == label).order_by(DataProduct.priority.desc())
         _logger.debug('requested tags are %s', tags)
@@ -165,9 +163,15 @@ class SqliteDAL(AbsDAL):
 
     def search_param_type_tags(self, name, tipo, instrument, mode, pipeline, tags):
         _logger.debug('query search_param_type_tags name=%s instrument=%s tags=%s pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
-        session = Session()
+        session = self.session
+
+        if isinstance(instrument, six.string_types):
+            instrument_id = instrument
+        else:
+            instrument_id = instrument.name
+
         res = session.query(RecipeParameters).filter(
-            RecipeParameters.instrument_id == instrument,
+            RecipeParameters.instrument_id == instrument_id,
             RecipeParameters.pipeline == pipeline,
             RecipeParameters.name == name,
             RecipeParameters.mode == mode).one_or_none()
@@ -196,6 +200,8 @@ class SqliteDAL(AbsDAL):
 
         if override_mode:
             obsres.mode = override_mode
+        if obsres.instrument is None:
+            raise ValueError('Undefined Instrument')
 
         this_drp = self.drps.query_by_name(obsres.instrument)
 
@@ -244,3 +250,42 @@ class SqliteDAL(AbsDAL):
             return StoredProduct(id=0, tags={}, content=content)
         else:
             return self.search_prod_type_tags(tipo, ins, tags, pipeline)
+
+    def search_last_result_(self, dest, type, obsres, mode, field, node):
+        # So, if node is children, I have to obtain
+        session = self.session
+        if node == 'children':
+            print('obtain', field, 'from all the children of', obsres.taskid)
+            res = session.query(DataProcessingTask).filter_by(id=obsres.taskid).one()
+            result = []
+            for child in res.children:
+                # this can be done better...
+                nodes = session.query(ReductionResult).filter_by(task_id=child.id).first()
+                # this surely can be a mapping instead of a list
+
+                for prod in nodes.values:
+                    if prod.name == field:
+                        st = StoredProduct(
+                            id=prod.id,
+                            content=load(DataFrameType(), os.path.join(self.basedir, prod.contents)),
+                            tags={}
+                        )
+                        result.append(st)
+                        break
+            return result
+
+        elif node == 'prev':
+            print('obtain', field, 'from the previous node to', obsres.taskid)
+            res = session.query(DataProcessingTask).filter_by(id=obsres.taskid).one()
+            # inspect children of my parent
+            parent = res.parent
+            if parent:
+                print([child for child in parent.children])
+                raise NoResultFound
+            else:
+                # Im top level, no previous
+                raise NoResultFound
+        else:
+            print(dest, type, obsres, mode, field, node)
+
+        raise NotImplementedError
