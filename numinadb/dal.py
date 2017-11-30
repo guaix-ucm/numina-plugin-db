@@ -26,7 +26,7 @@ import logging
 import six
 import numina.drps
 from numina.store import load
-from numina.dal import AbsDAL
+from numina.dal.absdal import AbsDAL, AbsDrpDAL
 from numina.exceptions import NoResultFound
 from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
@@ -61,11 +61,12 @@ def search_oblock_from_id(session, obsref):
         raise NoResultFound("oblock with id %d not found" % obsid)
 
 
-class SqliteDAL(AbsDAL):
+class SqliteDAL(AbsDrpDAL):
     def __init__(self, dialect, session, basedir, datadir):
-        super(SqliteDAL, self).__init__()
+        drps = numina.drps.get_system_drps()
+        super(SqliteDAL, self).__init__(drps)
+
         self.dialect = dialect
-        self.drps = numina.drps.get_system_drps()
         self.session = session
         self.basedir = basedir
         self.datadir = datadir
@@ -74,42 +75,6 @@ class SqliteDAL(AbsDAL):
     def search_oblock_from_id(self, obsref):
 
         return search_oblock_from_id(self.session, obsref)
-
-    def search_recipe(self, ins, mode, pipeline):
-
-        drp = self.drps.query_by_name(ins)
-
-        if drp is None:
-            raise NoResultFound('DRP not found')
-
-        try:
-            this_pipeline = drp.pipelines[pipeline]
-        except KeyError:
-            raise NoResultFound('pipeline not found')
-
-        try:
-            recipe = this_pipeline.get_recipe_object(mode)
-            return recipe
-        except KeyError:
-            raise NoResultFound('mode not found')
-
-    def search_recipe_fqn(self, ins, mode, pipename):
-
-        drp = self.drps.query_by_name(ins)
-
-        this_pipeline = drp.pipelines[pipename]
-        recipes = this_pipeline.recipes
-        recipe_fqn = recipes[mode]
-        return recipe_fqn
-
-    def search_recipe_from_ob(self, ob):
-        try:
-            ins = ob.instrument.name
-        except AttributeError:
-            ins = ob.instrument
-        mode = ob.mode
-        pipeline = ob.pipeline
-        return self.search_recipe(ins, mode, pipeline)
 
     def search_prod_obsid(self, ins, obsid, pipeline):
         """Returns the first coincidence..."""
@@ -223,7 +188,7 @@ class SqliteDAL(AbsDAL):
 
         return obsres
 
-    def search_parameter(self, name, tipo, obsres):
+    def search_parameter(self, name, tipo, obsres, options=None):
         # returns StoredProduct
         instrument = obsres.instrument
         mode = obsres.mode
@@ -238,7 +203,7 @@ class SqliteDAL(AbsDAL):
             return self.search_param_type_tags(name, tipo, instrument, mode, pipeline, tags)
 
 
-    def search_product(self, name, tipo, obsres):
+    def search_product(self, name, tipo, obsres, options=None):
         # returns StoredProduct
         ins = obsres.instrument
         tags = obsres.tags
@@ -251,7 +216,7 @@ class SqliteDAL(AbsDAL):
         else:
             return self.search_prod_type_tags(tipo, ins, tags, pipeline)
 
-    def search_last_result_(self, dest, type, obsres, mode, field, node):
+    def search_result_relative(self, name, tipo, obsres, mode, field, node, options=None):
         # So, if node is children, I have to obtain
         session = self.session
         if node == 'children':
@@ -286,6 +251,4 @@ class SqliteDAL(AbsDAL):
                 # Im top level, no previous
                 raise NoResultFound
         else:
-            print(dest, type, obsres, mode, field, node)
-
-        raise NotImplementedError
+            pass # print(dest, type, obsres, mode, field, node)
