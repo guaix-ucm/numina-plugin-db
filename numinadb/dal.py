@@ -26,23 +26,16 @@ import logging
 import six
 import numina.drps
 from numina.store import load
-from numina.dal.absdal import AbsDAL, AbsDrpDAL
+from numina.dal.absdal import AbsDrpDAL
 from numina.exceptions import NoResultFound
-from numina.core.oresult import ObservationResult
 from numina.dal.stored import StoredProduct, StoredParameter
+from numina.dal.utils import tags_are_valid
 from numina.core import DataFrameType
 
 from .model import ObservingBlock, DataProduct, RecipeParameters, ObservingBlockAlias
 from .model import DataProcessingTask, ReductionResult
 
 _logger = logging.getLogger("numina.db.dal")
-
-
-def tags_are_valid(subset, superset):
-    for key, val in subset.items():
-        if key in superset and superset[key] != val:
-            return False
-    return True
 
 
 def search_oblock_from_id(session, obsref):
