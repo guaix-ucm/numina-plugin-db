@@ -185,12 +185,13 @@ class ReductionResult(Base):
     obsmode = Column(String(40))
     recipe = Column(String(100))
 
-    task_id = Column(Integer, ForeignKey('dp_task.id'), nullable=False)
+    task_id = Column(Integer, ForeignKey('dp_task.id'), unique=True, nullable=False)
+    ob_id = Column(String, ForeignKey("obs.id"), nullable=False)
     qc = Column(Enum(qc.QC), default=qc.QC.UNKNOWN)
 
     values = relationship("ReductionResultValue")
-    instrument = relationship("Instrument")
-    task = relationship("DataProcessingTask", backref=backref('reduction_result'))
+    task = relationship("DataProcessingTask", backref=backref('reduction_result', uselist=False))
+    ob = relationship("ObservingBlock", backref=backref('reduction_results'))
 
 
 class ReductionResultValue(Base):

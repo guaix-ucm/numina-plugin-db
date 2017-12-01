@@ -1,5 +1,5 @@
 #
-# Copyright 2016 Universidad Complutense de Madrid
+# Copyright 2016-2017 Universidad Complutense de Madrid
 #
 # This file is part of Numina
 #
@@ -96,6 +96,7 @@ class ProcessingTask(numina.user.helpers.ProcessingTask):
 
         # datatype = Column(String(45))
         result_db.task_id = self.runinfo['taskid']
+        result_db.ob_id = self.observation['observing_result']
         # dateobs = Column(DateTime)
         if hasattr(result, 'qc'):
             result_db.qc = result.qc
