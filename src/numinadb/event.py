@@ -32,14 +32,14 @@ _managers = _create_managers()
 
 
 def manage(name, callable):
-    global _managers
+    global _managers  # noqa
     manager = _managers[name]
     manager.register(callable)
     return callable
 
 
 def call_event(name, *args, **kwargs):
-    global _managers
+    global _managers  # noqa
     manager = _managers[name]
     return manager(*args, **kwargs)
 
@@ -51,4 +51,3 @@ class on_event(object):
     def __call__(self, fn):
         manage(self.name, fn)
         return fn
-

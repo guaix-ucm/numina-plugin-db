@@ -54,6 +54,7 @@ base_db_info_keys = [
     'quality_control'
 ]
 
+
 def metadata_fits(obj, drps):
 
     # First. get instrument
@@ -128,10 +129,11 @@ def ingest_control_file(session, path):
         for plp, modes in data1.items():
             for mode, params in modes.items():
                 for param in params:
-                    dbpar = session.query(RecipeParameters).filter_by(instrument_id=ins,
-                                                                   pipeline=plp,
-                                                                   mode=mode,
-                                                                   name=param['name']).first()
+                    dbpar = session.query(RecipeParameters).filter_by(
+                        instrument_id=ins,
+                        pipeline=plp,
+                        mode=mode,
+                        name=param['name']).first()
                     if dbpar is None:
                         newpar = RecipeParameters()
                         newpar.id = None
@@ -198,8 +200,8 @@ def ingest_ob_file(session, path):
             full_fname = os.path.join(ingestdir, fname)
             print(fname, full_fname)
             result = metadata_fits(full_fname, drps)
-            #numtype = result['type']
-            #blck_uuid = obs.uuid # result.get('blckuuid', obs.uuid)
+            # numtype = result['type']
+            # blck_uuid = obs.uuid # result.get('blckuuid', obs.uuid)
             result['path'] = fname
             meta_frames.append(result)
 
@@ -222,7 +224,7 @@ def ingest_ob_file(session, path):
             ob.completion_time = ob.frames[-1].completion_time
 
         # Facts
-        #add_ob_facts(session, ob, ingestdir)
+        # add_ob_facts(session, ob, ingestdir)
 
         # raw frames insertion
         # for frame in frames:
@@ -353,7 +355,7 @@ def ingest_dir(session, ingestdir):
         metadata_basic = prod[2]
         recheck = prod[3]
         fullpath = contents
-        relpath = fullpath # os.path.relpath(fullpath, self.runinfo['base_dir'])
+        relpath = fullpath  # os.path.relpath(fullpath, self.runinfo['base_dir'])
         print('processing', relpath)
         prod_entry = DataProduct(instrument_id=metadata_basic['instrument'],
                                  datatype=datatype,

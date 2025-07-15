@@ -32,6 +32,7 @@ can be used with many common vertical schemas as-is or with minor adaptations.
 """
 # from __future__ import unicode_literals
 
+
 class ProxiedDictMixin(object):
     """Adds obj[key] access to a mapped class.
 

@@ -43,7 +43,7 @@ class ControlSystem(basecontrol.ControlSystem):
         now = datetime.datetime.now()
         ob = ObservingBlock(instrument=self.ins, mode=self.mode, start_time=now)
         session.add(ob)
-        session.commit() # So that we have ob.id
+        session.commit()  # So that we have ob.id
         iterf = thiss.run(self, exposure, repeat)
         self.ob_data['repeat'] = repeat
         self.ob_data['name'] = None

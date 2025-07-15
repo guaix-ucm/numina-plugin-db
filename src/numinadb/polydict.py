@@ -83,8 +83,10 @@ class PolymorphicVerticalProperty(object):
                 if attribute is not None
             ]
             return case(whens, self.cls.type, null())
+
         def __eq__(self, other):
             return self._case() == cast(other, String)
+
         def __ne__(self, other):
             return self._case() != cast(other, String)
 
@@ -113,10 +115,11 @@ def on_new_class(mapper, cls_):
             info_dict[discriminator] = (k, discriminator)
     cls_.type_map = info_dict
 
+
 if __name__ == '__main__':
     from sqlalchemy import (Column, Integer, Unicode,
-        ForeignKey, UnicodeText, and_, or_, String, Boolean, cast,
-        null, case, create_engine)
+                            ForeignKey, UnicodeText, and_, or_, String, Boolean, cast,
+                            null, case, create_engine)
     from sqlalchemy.orm import relationship, Session
     from sqlalchemy.orm.collections import attribute_mapped_collection
     from sqlalchemy.ext.declarative import declarative_base
@@ -124,10 +127,8 @@ if __name__ == '__main__':
 
     Base = declarative_base()
 
-
     class AnimalFact(PolymorphicVerticalProperty, Base):
         """A fact about an animal."""
-
         __tablename__ = 'animal_fact'
 
         animal_id = Column(ForeignKey('animal.id'), primary_key=True)
@@ -149,11 +150,10 @@ if __name__ == '__main__':
         name = Column(Unicode(100))
 
         facts = relationship("AnimalFact",
-                    collection_class=attribute_mapped_collection('key'))
+                             collection_class=attribute_mapped_collection('key'))
 
         _proxied = association_proxy("facts", "value",
-                            creator=
-                            lambda key, value: AnimalFact(key=key, value=value))
+                                     creator=lambda key, value: AnimalFact(key=key, value=value))
 
         def __init__(self, name):
             self.name = name
@@ -204,24 +204,20 @@ if __name__ == '__main__':
     q = (session.query(Animal).
          filter(Animal.facts.any(
            and_(AnimalFact.key == 'weasel-like',
-                AnimalFact.value == True))))
+                AnimalFact.value == True))))  # noqa
     print('weasel-like animals', q.all())
 
     q = (session.query(Animal).
          filter(Animal.with_characteristic('weasel-like', True)))
     print('weasel-like animals again', q.all())
 
-    q = (session.query(Animal).
-           filter(Animal.with_characteristic('poisonous', False)))
+    q = (session.query(Animal).filter(Animal.with_characteristic('poisonous', False)))
     print('animals with poisonous=False', q.all())
 
     q = (session.query(Animal).
          filter(or_(
                     Animal.with_characteristic('poisonous', False),
-                    ~Animal.facts.any(AnimalFact.key == 'poisonous')
-                    )
-                )
-        )
+                    ~Animal.facts.any(AnimalFact.key == 'poisonous'))))
     print('non-poisonous animals', q.all())
 
     q = (session.query(Animal).

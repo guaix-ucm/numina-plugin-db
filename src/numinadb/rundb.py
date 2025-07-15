@@ -125,7 +125,7 @@ def register(subparsers, config):
     parser_db.add_argument('--initdb', nargs='?',
                            default=None,
                            const=db_default,
-                           metavar='URI', 
+                           metavar='URI',
                            help='Create a database')
 
     parser_db.set_defaults(command=mode_db)
@@ -228,7 +228,7 @@ def run_task(session, task, dal):
             raise ValueError('nor awaited')
     else:
         print('im running and nothing is awaited')
-        task.waiting  = False
+        task.waiting = False
 
     # setup things
     task.start_time = datetime.datetime.utcnow()
@@ -247,6 +247,7 @@ def run_task(session, task, dal):
     finally:
         task.completion_time = datetime.datetime.utcnow()
         session.commit()
+
 
 def mode_run_common_obs(args, extra_args):
     """Observing mode processing mode of numina."""
@@ -275,7 +276,7 @@ def mode_run_common_obs(args, extra_args):
     _logger.debug("DAL is %s with datadir=%s", type(dal), datadir)
 
     # Directories with relevant data
-    pipe_name = 'default'
+    # pipe_name = 'default'
 
     print('start')
     run_task(session, task, dal)
@@ -408,7 +409,7 @@ def reductionOB_request(dal, taskid, obid, mode_name=None, pipe_name='default'):
         workenv.copyfiles_stage2(rinput)
         workenv.adapt_obsres(obsres)
 
-    completed_task = run_recipe(recipe=recipe,task=task, rinput=rinput,
+    completed_task = run_recipe(recipe=recipe, task=task, rinput=rinput,
                                 workenv=workenv, task_control=task_control)
 
     where = DiskStorageDefault(resultsdir=workenv.resultsdir)

@@ -71,7 +71,7 @@ class SqliteDAL(AbsDrpDAL):
 
     def search_prod_obsid(self, ins, obsid, pipeline):
         """Returns the first coincidence..."""
-        ins_prod = None # self.prod_table[ins]
+        ins_prod = None  # self.prod_table[ins]
 
         # search results of these OBs
         for prod in ins_prod.values():
@@ -120,7 +120,8 @@ class SqliteDAL(AbsDrpDAL):
             raise NoResultFound(msg)
 
     def search_param_type_tags(self, name, tipo, instrument, mode, pipeline, tags):
-        _logger.debug('query search_param_type_tags name=%s instrument=%s tags=%s pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
+        _logger.debug('query search_param_type_tags name=%s instrument=%s tags=%s '
+                      'pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
         session = self.session
 
         if isinstance(instrument, six.string_types):
@@ -191,7 +192,6 @@ class SqliteDAL(AbsDrpDAL):
         else:
             return self.search_param_type_tags(name, tipo, instrument, mode, pipeline, tags)
 
-
     def search_product(self, name, tipo, obsres, options=None):
         # returns StoredProduct
         ins = obsres.instrument
@@ -240,4 +240,4 @@ class SqliteDAL(AbsDrpDAL):
                 # Im top level, no previous
                 raise NoResultFound
         else:
-            pass # print(dest, type, obsres, mode, field, node)
+            pass  # print(dest, type, obsres, mode, field, node)

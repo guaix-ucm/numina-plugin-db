@@ -11,8 +11,7 @@
 
 import datetime
 
-import six
-from sqlalchemy import Integer, String, DateTime, Float, Boolean, TIMESTAMP, Unicode, UnicodeText
+from sqlalchemy import Integer, String, DateTime, Float, Boolean, UnicodeText
 from sqlalchemy import CHAR
 from sqlalchemy import Table, Column, ForeignKey, UniqueConstraint
 from sqlalchemy import Enum
@@ -100,10 +99,7 @@ class ProductFact(PolymorphicVerticalProperty, Base):
     # add information about storage for different types
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
-    if six.PY2:
-        char_value = Column(String, info={'type': ((str, unicode), 'string')})
-    else:
-        char_value = Column(String, info={'type': (str, 'string')})
+    char_value = Column(String, info={'type': (str, 'string')})
     # unicode_value = Column(String, info={'type': (unicode, 'unicode')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
@@ -120,10 +116,7 @@ class ParameterFact(PolymorphicVerticalProperty, Base):
     # add information about storage for different types
     # in the info dictionary of Columns
     int_value = Column(Integer, info={'type': (int, 'integer')})
-    if six.PY2:
-        char_value = Column(String, info={'type': ((str, unicode), 'string')})
-    else:
-        char_value = Column(String, info={'type': (str, 'string')})
+    char_value = Column(String, info={'type': (str, 'string')})
     boolean_value = Column(Boolean, info={'type': (bool, 'boolean')})
     float_value = Column(Float, info={'type': (float, 'float')})
 
@@ -222,12 +215,12 @@ class DataProduct(ProxiedDictMixin, Base):
 
     facts = relationship("ProductFact", collection_class=attribute_mapped_collection('key'))
 
-    crel = lambda key, value: ProductFact(key=key, value=value)
+    crel = lambda key, value: ProductFact(key=key, value=value)  # noqa
     _proxied = association_proxy("facts", "value", creator=crel)
 
     def __init__(self, instrument_id, datatype, task_id, contents, priority=0):
         self.instrument_id = instrument_id
-        self.datatype =  datatype
+        self.datatype = datatype
         self.task_id = task_id
         self.contents = contents
         self.priority = priority
@@ -267,7 +260,7 @@ class RecipeParameterValues(ProxiedDictMixin, Base):
 
     facts = relationship("ParameterFact", collection_class=attribute_mapped_collection('key'))
 
-    crel = lambda key, value: ParameterFact(key=key, value=value)
+    crel = lambda key, value: ParameterFact(key=key, value=value)  # noqa
     _proxied = association_proxy("facts", "value", creator=crel)
 
     @classmethod
