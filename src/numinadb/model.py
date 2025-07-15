@@ -21,7 +21,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 import numina.types.dataframe
 import numina.types.qc as qc
 
-from numinadb.base import Base
+from .base import Base
 from .jsonsqlite import MagicJSON
 from .polydict import PolymorphicVerticalProperty
 from .proxydict import ProxiedDictMixin

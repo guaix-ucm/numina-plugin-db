@@ -3,7 +3,8 @@ from sqlalchemy import create_engine
 from sqlalchemy import MetaData
 from sqlalchemy.orm import sessionmaker
 
-from numinadb.model import Base
+from ..model import Base
+
 
 @pytest.fixture
 def session():

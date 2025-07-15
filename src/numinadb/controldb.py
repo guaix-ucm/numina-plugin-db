@@ -1,15 +1,14 @@
 
-from __future__ import print_function
-
-import os
-import logging
 import datetime
+import logging
+import os
 
 import megaradrp.simulation.control as basecontrol
-
-from numinadb.dal import Session
-from numinadb.model import ObservingBlock, Frame, Base, Fact
 from sqlalchemy import create_engine
+
+from .dal import Session
+from .base import Base
+from .model import ObservingBlock, Frame, Fact
 
 
 _logger = logging.getLogger("simulation.controldb")

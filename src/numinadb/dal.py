@@ -113,7 +113,7 @@ class SqliteDAL(AbsDrpDAL):
                       'pipeline=%s mode=%s', name, instrument, tags, pipeline, mode)
         session = self.session
 
-        if isinstance(instrument, six.string_types):
+        if isinstance(instrument, str):
             instrument_id = instrument
         else:
             instrument_id = instrument.name
