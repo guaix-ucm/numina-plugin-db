@@ -163,12 +163,8 @@ class SqliteDAL(AbsDrpDAL):
 
         this_drp = self.drps.query_by_name(obsres.instrument)
 
-        for mode in this_drp.modes:
-            if mode.key == obsres.mode:
-                tagger = mode.tagger
-                break
-        else:
-            raise ValueError('no mode for %s in instrument %s' % (obsres.mode, obsres.instrument))
+        mode = this_drp.modes[obsres.mode]
+        tagger = mode.tagger
 
         if tagger is None:
             master_tags = {}

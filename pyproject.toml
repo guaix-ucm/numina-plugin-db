@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools >= 45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "numinadb"
+dynamic = ["version"]
+description = "MEGARA Data Reduction Pipeline"
+readme = "README.rst"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+  {name = "Sergio Pascual", email = "sergiopr@fis.ucm.es"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numina",
+    "six",
+    "sqlalchemy"
+]
+
+[project.entry-points."numina.plugins.1"]
+rundb = "numinadb.rundb:register"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+]
+
+[tool.setuptools_scm]
+write_to = "src/numinadb/_version.py"
